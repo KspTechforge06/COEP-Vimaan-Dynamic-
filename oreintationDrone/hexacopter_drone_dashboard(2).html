@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>VIMAAN DYNAMICS</title>
+<style>
+:root[data-theme="dark"] {
+  --bg-base:   #0a0a0a;
+  --bg-card:   #111111;
+  --bg-ele:    #1a1a1a;
+  --bg-ele2:   #222222;
+  --bd:        rgba(255,255,255,0.06);
+  --bd2:       rgba(255,255,255,0.11);
+  --t1:        #e2e2e2;
+  --t2:        #888888;
+  --t3:        #444444;
+  --acc:       #c8ff00;
+  --green:     #39e07a;
+  --red:       #ff4d4d;
+  --amber:     #ffb800;
+  --cbg:       #0a0a0a;
+}
+:root[data-theme="light"] {
+  --bg-base:   #f2f2f2;
+  --bg-card:   #ffffff;
+  --bg-ele:    #ebebeb;
+  --bg-ele2:   #e0e0e0;
+  --bd:        rgba(0,0,0,0.08);
+  --bd2:       rgba(0,0,0,0.15);
+  --t1:        #111111;
+  --t2:        #555555;
+  --t3:        #aaaaaa;
+  --acc:       #3a7d00;
+  --green:     #16a34a;
+  --red:       #dc2626;
+  --amber:     #d97706;
+  --cbg:       #e4e4e4;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+::-webkit-scrollbar{width:3px;height:3px;}
+::-webkit-scrollbar-thumb{background:var(--bg-ele2);border-radius:2px;}
+body{background:var(--bg-base);font-family:'Courier New',monospace;color:var(--t1);min-height:100vh;transition:background .2s,color .2s;}
+
+/* HEADER */
+#hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 13px;border-bottom:1px solid var(--bd2);background:var(--bg-card);}
+.brand{display:flex;align-items:center;gap:9px;font-size:11px;font-weight:700;letter-spacing:.18em;color:var(--acc);}
+.hright{display:flex;gap:7px;}
+.pill{display:flex;align-items:center;gap:5px;background:var(--bg-ele);border:1px solid var(--bd2);border-radius:3px;padding:4px 9px;font-size:9px;letter-spacing:.08em;cursor:pointer;transition:background .15s;}
+.pill:hover{background:var(--bg-ele2);}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--t3);flex-shrink:0;}
+.dot.on  {background:var(--green);box-shadow:0 0 5px var(--green);animation:bk 1.4s infinite;}
+.dot.ph  {background:var(--amber);box-shadow:0 0 5px var(--amber);animation:bk 1.4s infinite;}
+.dot.sim {background:var(--acc);  box-shadow:0 0 5px var(--acc);  animation:bk 1.4s infinite;}
+@keyframes bk{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* GRID */
+#root{display:grid;grid-template-columns:1.15fr 0.85fr;grid-template-rows:auto auto auto;gap:7px;padding:7px;}
+.card{background:var(--bg-card);border:1px solid var(--bd);border-radius:5px;padding:10px;transition:background .2s,border-color .2s;}
+.ctitle{font-size:8px;font-weight:700;letter-spacing:.2em;color:var(--t3);text-transform:uppercase;margin-bottom:9px;}
+
+/* VIEWER */
+#vc{grid-column:1;grid-row:1/3;}
+canvas#c3d{width:100%!important;height:282px!important;display:block;border-radius:3px;background:var(--cbg);}
+.euler{display:flex;gap:14px;margin-top:7px;font-size:10px;color:var(--t2);letter-spacing:.04em;}
+.euler b{color:var(--acc);font-size:12px;}
+
+/* MAP */
+#mc{grid-column:2;grid-row:1;}
+#map{width:100%;height:202px;border-radius:3px;overflow:hidden;}
+
+/* TELEM */
+#tc{grid-column:2;grid-row:2;}
+.tg{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;}
+.gauge{background:var(--bg-ele);border:1px solid var(--bd);border-radius:3px;padding:7px 5px;text-align:center;}
+.gauge .v{font-size:16px;font-weight:700;color:var(--t1);line-height:1;}
+.gauge .u{font-size:8px;color:var(--t3);margin-top:2px;}
+.gauge .l{font-size:7px;color:var(--t2);margin-top:2px;letter-spacing:.08em;text-transform:uppercase;}
+
+/* CONTROLS */
+#cc{grid-column:1/3;grid-row:3;}
+.crow{display:flex;gap:7px;flex-wrap:wrap;align-items:stretch;}
+
+.cpanel{background:var(--bg-ele);border:1px solid var(--bd2);border-radius:4px;padding:8px 12px;display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.clabel strong{color:var(--t1);display:block;font-size:11px;font-weight:700;letter-spacing:.05em;}
+.clabel span{font-size:8px;color:var(--t2);display:block;margin-top:1px;}
+.clabel small{font-size:8px;color:var(--t3);display:block;margin-top:2px;}
+.stxt{font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-top:2px;}
+.stxt.on{color:var(--green);}
+
+/* Toggle */
+.tog{position:relative;width:46px;height:24px;flex-shrink:0;}
+.tog input{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0;z-index:1;}
+.ttrack{position:absolute;inset:0;border-radius:12px;background:var(--bg-ele2);border:1px solid var(--bd2);transition:background .18s,border-color .18s;}
+.tthumb{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--t3);transition:transform .18s,background .18s;pointer-events:none;}
+.tog input:checked~.ttrack{background:rgba(57,224,122,.15);border-color:var(--green);}
+.tog input:checked~.tthumb{transform:translateX(22px);background:var(--green);box-shadow:0 0 5px var(--green);}
+
+.wspanel{background:var(--bg-ele);border:1px solid var(--bd2);border-radius:4px;padding:8px 10px;display:flex;align-items:center;gap:6px;flex:1 1 0;min-width:0;}
+input.wsin{flex:1;min-width:0;background:var(--bg-base);border:1px solid var(--bd2);border-radius:3px;padding:4px 8px;font-size:10px;color:var(--t1);font-family:'Courier New',monospace;outline:none;transition:border-color .15s;}
+input.wsin:focus{border-color:var(--acc);}
+button.btn{background:transparent;border:1px solid var(--bd2);border-radius:3px;padding:4px 10px;font-size:9px;color:var(--t2);cursor:pointer;white-space:nowrap;font-family:'Courier New',monospace;letter-spacing:.06em;transition:background .13s,border-color .13s,color .13s;}
+button.btn:hover{background:var(--bg-ele2);border-color:var(--t2);color:var(--t1);}
+button.btn.a{border-color:var(--acc);color:var(--acc);}
+button.btn.a:hover{background:rgba(200,255,0,.07);}
+button.btn.r{border-color:var(--red);color:var(--red);}
+button.btn.r:hover{background:rgba(255,77,77,.07);}
+
+.log{font-family:'Courier New',monospace;font-size:9px;color:var(--t2);height:50px;overflow-y:auto;background:var(--bg-base);border-radius:3px;padding:5px 8px;margin-top:7px;border:1px solid var(--bd);}
+.log div{line-height:1.75;}
+.ok {color:var(--green);}
+.er {color:var(--red);}
+.cm {color:var(--amber);}
+.if {color:var(--t2);}
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <div class="brand">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+      <polygon points="12,2 20,6.5 20,17.5 12,22 4,17.5 4,6.5" stroke="currentColor" stroke-width="1.1" fill="rgba(200,255,0,0.05)"/>
+      <circle cx="12" cy="12" r="2.2" fill="currentColor"/>
+      <line x1="12" y1="2"  x2="12" y2="5.5" stroke="currentColor" stroke-width="0.9"/>
+      <line x1="12" y1="18.5" x2="12" y2="22" stroke="currentColor" stroke-width="0.9"/>
+      <line x1="4"  y1="6.5" x2="7"  y2="8.2" stroke="currentColor" stroke-width="0.9"/>
+      <line x1="17" y1="15.8" x2="20" y2="17.5" stroke="currentColor" stroke-width="0.9"/>
+      <line x1="20" y1="6.5" x2="17" y2="8.2" stroke="currentColor" stroke-width="0.9"/>
+      <line x1="7"  y1="15.8" x2="4" y2="17.5" stroke="currentColor" stroke-width="0.9"/>
+    </svg>
+    VIMAAN DYNAMICS · GCS
+  </div>
+  <div class="hright">
+    <div class="pill" id="wsbadge"><div class="dot" id="wsdot"></div><span id="wsstat">OFFLINE</span></div>
+    <div class="pill" onclick="toggleTheme()"><span id="ticon">☀</span><span id="tlabel">LIGHT</span></div>
+  </div>
+</div>
+
+<div id="root">
+
+  <div class="card" id="vc">
+    <div class="ctitle">3D orientation · hexacopter</div>
+    <canvas id="c3d"></canvas>
+    <div class="euler">
+      <span>ROLL <b id="dr">0.0°</b></span>
+      <span>PITCH <b id="dp">0.0°</b></span>
+      <span>YAW <b id="dy">0.0°</b></span>
+    </div>
+  </div>
+
+  <div class="card" id="mc">
+    <div class="ctitle">GPS · live track</div>
+    <div id="map"></div>
+  </div>
+
+  <div class="card" id="tc">
+    <div class="ctitle">Telemetry</div>
+    <div class="tg">
+      <div class="gauge"><div class="v" id="ta">0.0</div><div class="u">m</div><div class="l">Alt</div></div>
+      <div class="gauge"><div class="v" id="ts">0.0</div><div class="u">km/h</div><div class="l">Speed</div></div>
+      <div class="gauge"><div class="v" id="tsat">0</div><div class="u">sat</div><div class="l">GPS</div></div>
+      <div class="gauge"><div class="v" id="tlat">—</div><div class="u"></div><div class="l">Lat</div></div>
+      <div class="gauge"><div class="v" id="tlng">—</div><div class="u"></div><div class="l">Lng</div></div>
+      <div class="gauge"><div class="v" id="tr">0.0</div><div class="u">°</div><div class="l">Roll</div></div>
+      <div class="gauge"><div class="v" id="tpi">0.0</div><div class="u">°</div><div class="l">Pitch</div></div>
+      <div class="gauge"><div class="v" id="tyw">0.0</div><div class="u">°</div><div class="l">Yaw</div></div>
+    </div>
+  </div>
+
+  <div class="card" id="cc">
+    <div class="ctitle">Controls · servo · imu · connection</div>
+    <div class="crow">
+
+      <div class="cpanel">
+        <div class="clabel">
+          <strong>SERVO</strong>
+          <span>GPIO 13 · PWM</span>
+          <div class="stxt" id="svtxt">OFF</div>
+        </div>
+        <label class="tog">
+          <input type="checkbox" id="svchk" onchange="toggleServo(this.checked)"/>
+          <div class="ttrack"></div><div class="tthumb"></div>
+        </label>
+      </div>
+
+      <div class="cpanel">
+        <div class="clabel">
+          <strong>PHONE IMU</strong>
+          <span id="imutxt">Device orientation API</span>
+          <small id="imudet">Open on phone → tap Enable</small>
+        </div>
+        <button class="btn a" id="imubtn" onclick="togglePhoneIMU()">ENABLE</button>
+      </div>
+
+      <div class="wspanel">
+        <input class="wsin" id="wsin" placeholder="ws://192.168.x.x:81" value="ws://192.168.1.100:81"/>
+        <button class="btn a" onclick="connectWS()">CONNECT</button>
+        <button class="btn r" onclick="disconnectWS()">DISC</button>
+        <button class="btn"   onclick="exportCSV()">CSV↓</button>
+        <button class="btn"   onclick="toggleSim()">SIM</button>
+      </div>
+
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+</div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── THEME ──────────────────────────────────────────────────────────
+let isDark=true;
+function toggleTheme(){
+  isDark=!isDark;
+  document.documentElement.setAttribute('data-theme',isDark?'dark':'light');
+  document.getElementById('ticon').textContent=isDark?'☀':'☾';
+  document.getElementById('tlabel').textContent=isDark?'LIGHT':'DARK';
+  scene.background=new THREE.Color(isDark?0x0a0a0a:0xe4e4e4);
+  grd.material.color.set(isDark?0x1a1a1a:0xcccccc);
+}
+
+// ── THREE.JS ───────────────────────────────────────────────────────
+const cv=document.getElementById('c3d');
+const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(cv.clientWidth,282);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0a0a0a);
+
+const cam=new THREE.PerspectiveCamera(44,cv.clientWidth/282,0.1,100);
+cam.position.set(0,2.6,4.3); cam.lookAt(0,0,0);
+
+scene.add(new THREE.AmbientLight(0xffffff,0.28));
+const sun=new THREE.DirectionalLight(0xffffff,1.05); sun.position.set(4,7,4); scene.add(sun);
+const rim=new THREE.DirectionalLight(0xc8ff00,0.3); rim.position.set(-4,2,-3); scene.add(rim);
+
+const grd=new THREE.GridHelper(7,18,0x1a1a1a,0x1a1a1a); scene.add(grd);
+
+const drone=new THREE.Group(); scene.add(drone);
+
+const mBody=new THREE.MeshPhongMaterial({color:0x1c1c1c,shininess:8});
+const mArm =new THREE.MeshPhongMaterial({color:0x111111,shininess:4});
+const mMot =new THREE.MeshPhongMaterial({color:0x080808,shininess:55});
+const mAcc =new THREE.MeshPhongMaterial({color:0xc8ff00,emissive:0x3a5500,shininess:90});
+
+// Body plates
+drone.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.27,0.27,0.042,16),mBody)));
+const bp=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.034,16),mBody); bp.position.y=-0.062; drone.add(bp);
+// Stack posts
+for(let i=0;i<4;i++){const a=(i/4)*Math.PI*2+Math.PI/4,p=new THREE.Mesh(new THREE.CylinderGeometry(0.013,0.013,0.072,6),mArm);p.position.set(Math.cos(a)*0.14,-0.014,Math.sin(a)*0.14);drone.add(p);}
+// Dome
+const dm=new THREE.Mesh(new THREE.SphereGeometry(0.165,14,8,0,Math.PI*2,0,Math.PI/2),new THREE.MeshPhongMaterial({color:0x1a1a1a,shininess:20}));
+dm.position.y=0.042; drone.add(dm);
+// Front LED
+const led=new THREE.Mesh(new THREE.SphereGeometry(0.026,8,8),new THREE.MeshPhongMaterial({color:0xc8ff00,emissive:0xc8ff00,emissiveIntensity:1}));
+led.position.set(0,0.05,-0.25); drone.add(led);
+
+// Arms + motors + props
+const ag=new THREE.Group(); drone.add(ag);
+const props=[];
+for(let i=0;i<6;i++){
+  const ang=(i/6)*Math.PI*2, L=0.84;
+  const mx=Math.cos(ang)*L, mz=Math.sin(ang)*L;
+  const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.019,0.019,L,6),mArm);
+  arm.position.set(mx/2,-0.008,mz/2); arm.rotation.y=-ang; arm.rotation.z=Math.PI/2; ag.add(arm);
+  // Motor
+  const mt=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,0.04,12),mMot); mt.position.set(mx,0.04,mz); ag.add(mt);
+  const mb=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.07,0.048,12),mMot); mb.position.set(mx,0.006,mz); ag.add(mb);
+  // Accent ring
+  const rng=new THREE.Mesh(new THREE.TorusGeometry(0.066,0.006,6,16),mAcc); rng.position.set(mx,0.04,mz); rng.rotation.x=Math.PI/2; ag.add(rng);
+  // Props (alternating lime / charcoal)
+  const pc=i%2===0?0xc8ff00:0x222222;
+  const pm=new THREE.MeshPhongMaterial({color:pc,transparent:true,opacity:0.86,shininess:25});
+  const pg=new THREE.Group();
+  pg.add(new THREE.Mesh(new THREE.BoxGeometry(0.52,0.011,0.055),pm));
+  const b2=new THREE.Mesh(new THREE.BoxGeometry(0.52,0.011,0.055),pm); b2.rotation.y=Math.PI/2; pg.add(b2);
+  pg.add(new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.015,8),mMot));
+  pg.position.set(mx,0.1,mz); pg.userData.spin=i%2===0?1:-1; props.push(pg); ag.add(pg);
+}
+
+// Landing gear
+for(let i=0;i<4;i++){
+  const a=(i/4)*Math.PI*2+Math.PI/4;
+  const cx=Math.cos(a)*0.29, cz=Math.sin(a)*0.29;
+  const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,0.21,5),mArm);
+  leg.position.set(cx,-0.15,cz); leg.rotation.z=Math.cos(a)*0.2; leg.rotation.x=Math.sin(a)*0.2; drone.add(leg);
+  const ft=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.19,5),mArm);
+  ft.rotation.z=Math.PI/2; ft.position.set(cx,-0.26,cz); drone.add(ft);
+}
+
+// Servo visual
+const svb=new THREE.Mesh(new THREE.BoxGeometry(0.09,0.048,0.065),mBody); svb.position.set(0.05,-0.078,0.11); drone.add(svb);
+const sva=new THREE.Mesh(new THREE.BoxGeometry(0.17,0.012,0.022),mAcc); sva.position.set(0.05,-0.078,0.11); drone.add(sva);
+
+let roll=0,pitch=0,yaw=0,servoOn=false;
+const D=Math.PI/180;
+
+function animate(){
+  requestAnimationFrame(animate);
+  props.forEach(p=>p.rotation.y+=0.22*p.userData.spin);
+  sva.rotation.y=servoOn?Math.sin(Date.now()*0.004)*0.9:0;
+  drone.rotation.set(pitch*D,yaw*D,roll*D);
+  renderer.render(scene,cam);
+}
+animate();
+window.addEventListener('resize',()=>{renderer.setSize(cv.clientWidth,282);cam.aspect=cv.clientWidth/282;cam.updateProjectionMatrix();});
+
+// ── MAP ────────────────────────────────────────────────────────────
+const map=L.map('map',{zoomControl:true}).setView([18.52,73.85],14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OSM',maxZoom:19}).addTo(map);
+const ico=L.divIcon({html:'<div style="width:11px;height:11px;background:#c8ff00;border:2px solid #0a0a0a;border-radius:50%;box-shadow:0 0 7px #c8ff00"></div>',iconSize:[11,11],iconAnchor:[5,5]});
+let mkr=null;
+const trail=L.polyline([],{color:'#c8ff00',weight:1.4,opacity:0.45}).addTo(map);
+const tp=[];
+function updMap(lat,lng){
+  if(!lat||!lng||lat===0)return;
+  const ll=[lat,lng];
+  if(!mkr){mkr=L.marker(ll,{icon:ico}).addTo(map);}else{mkr.setLatLng(ll);}
+  tp.push(ll);if(tp.length>400)tp.shift();trail.setLatLngs(tp);map.panTo(ll);
+}
+
+// ── UI ─────────────────────────────────────────────────────────────
+const csv=[['time','roll','pitch','yaw','lat','lng','alt','speed','sats']];
+
+function updUI(d){
+  roll=d.roll||0; pitch=d.pitch||0; yaw=d.yaw||0;
+  document.getElementById('dr').textContent=roll.toFixed(1)+'°';
+  document.getElementById('dp').textContent=pitch.toFixed(1)+'°';
+  document.getElementById('dy').textContent=yaw.toFixed(1)+'°';
+  document.getElementById('tr').textContent=roll.toFixed(1);
+  document.getElementById('tpi').textContent=pitch.toFixed(1);
+  document.getElementById('tyw').textContent=yaw.toFixed(1);
+  document.getElementById('ta').textContent=(d.alt||0).toFixed(1);
+  document.getElementById('ts').textContent=(d.speed||0).toFixed(1);
+  document.getElementById('tsat').textContent=d.sats||0;
+  document.getElementById('tlat').textContent=d.lat?d.lat.toFixed(5):'—';
+  document.getElementById('tlng').textContent=d.lng?d.lng.toFixed(5):'—';
+  if(d.lat&&d.lng)updMap(d.lat,d.lng);
+  const now=new Date().toISOString().substr(11,8);
+  csv.push([now,roll.toFixed(2),pitch.toFixed(2),yaw.toFixed(2),d.lat||0,d.lng||0,(d.alt||0).toFixed(1),(d.speed||0).toFixed(1),d.sats||0]);
+  log(`[${now}] R:${roll.toFixed(1)} P:${pitch.toFixed(1)} Y:${yaw.toFixed(1)} | ${d.lat?d.lat.toFixed(5)+','+d.lng.toFixed(5):'no gps'}`,'if');
+}
+function log(msg,cls){
+  const el=document.getElementById('log');
+  const d=document.createElement('div');d.className=cls;d.textContent=msg;
+  el.appendChild(d);el.scrollTop=el.scrollHeight;
+  if(el.children.length>80)el.removeChild(el.firstChild);
+}
+
+// ── SERVO ──────────────────────────────────────────────────────────
+function toggleServo(on){
+  servoOn=on;
+  const t=document.getElementById('svtxt');
+  t.textContent=on?'ON':'OFF'; t.className='stxt'+(on?' on':'');
+  const cmd=on?'servo:1':'servo:0';
+  if(ws&&ws.readyState===1){ws.send(cmd);log('→ '+cmd,'cm');}
+  else log('→ '+cmd+' (disconnected)','cm');
+}
+
+// ── PHONE IMU ──────────────────────────────────────────────────────
+let pImu=false,imuH=null;
+function onDO(e){
+  updUI({roll:e.gamma||0,pitch:e.beta||0,yaw:e.alpha||0,lat:0,lng:0,alt:0,speed:0,sats:0});
+}
+async function togglePhoneIMU(){
+  if(pImu){
+    window.removeEventListener('deviceorientation',imuH,true);
+    pImu=false;
+    document.getElementById('imubtn').textContent='ENABLE';
+    document.getElementById('imubtn').className='btn a';
+    document.getElementById('imutxt').textContent='Device orientation API';
+    document.getElementById('imudet').textContent='Open on phone → tap Enable';
+    setDot('');setStat('OFFLINE');log('Phone IMU off','if');return;
+  }
+  if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+    try{const p=await DeviceOrientationEvent.requestPermission();if(p!=='granted'){log('Permission denied','er');return;}}
+    catch(e){log('Error: '+e.message,'er');return;}
+  }
+  if(!('DeviceOrientationEvent' in window)){log('Not supported on this device','er');return;}
+  imuH=onDO;window.addEventListener('deviceorientation',imuH,true);pImu=true;
+  document.getElementById('imubtn').textContent='DISABLE';
+  document.getElementById('imubtn').className='btn r';
+  document.getElementById('imutxt').textContent='Active — tilt your phone!';
+  document.getElementById('imudet').textContent='β→pitch  γ→roll  α→yaw';
+  setDot('ph');setStat('PHONE IMU');log('Phone IMU active','ok');
+}
+
+// ── WEBSOCKET ──────────────────────────────────────────────────────
+let ws=null;
+function setDot(c){document.getElementById('wsdot').className='dot'+(c?' '+c:'');}
+function setStat(t){document.getElementById('wsstat').textContent=t;}
+function connectWS(){
+  const url=document.getElementById('wsin').value.trim();
+  if(ws)ws.close();
+  try{
+    ws=new WebSocket(url);
+    ws.onopen=()=>{setDot('on');setStat('LIVE · '+url.replace('ws://',''));log('Connected → '+url,'ok');};
+    ws.onmessage=e=>{const r=e.data.trim();if(r.startsWith('{'))try{updUI(JSON.parse(r));}catch(_){}};
+    ws.onclose=()=>{setDot('');setStat('OFFLINE');log('Disconnected','er');};
+    ws.onerror=()=>log('WS error — check IP:81','er');
+  }catch(e){log('Failed: '+e.message,'er');}
+}
+function disconnectWS(){if(ws){ws.close();ws=null;}}
+
+// ── CSV ────────────────────────────────────────────────────────────
+function exportCSV(){
+  const b=new Blob([csv.map(r=>r.join(',')).join('\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download='drone_'+new Date().toISOString().substr(0,10)+'.csv';a.click();
+  log('CSV exported ('+(csv.length-1)+' rows)','ok');
+}
+
+// ── SIM ────────────────────────────────────────────────────────────
+let si=null,st=0,sla=18.52,sln=73.85;
+function toggleSim(){
+  if(si){clearInterval(si);si=null;setDot('');setStat('OFFLINE');log('Sim stopped','if');return;}
+  setDot('sim');setStat('SIMULATION');log('Sim running — SIM to stop','ok');
+  si=setInterval(()=>{
+    st+=0.05;sla+=0.000048*Math.cos(st*0.28);sln+=0.000065*Math.sin(st*0.38);
+    updUI({roll:23*Math.sin(st*0.72),pitch:17*Math.sin(st*0.52+1),yaw:(st*19)%360,
+           lat:sla,lng:sln,alt:34+11*Math.sin(st*0.31),speed:12+5*Math.cos(st*0.41),sats:9});
+  },80);
+}
+</script>
+</body>
+</html>

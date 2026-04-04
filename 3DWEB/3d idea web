@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hexaquad</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #101010;
+      overflow-x: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    #scroll-container {
+      height: 300vh;
+      position: relative;
+    }
+
+    #canvas-wrapper {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100vh;
+      z-index: 1;
+    }
+
+    #three-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #hero-text {
+      position: fixed;
+      top: 50%;
+      left: 6vw;
+      transform: translateY(-50%);
+      text-align: left;
+      z-index: 10;
+      pointer-events: none;
+      opacity: 0;
+      transition: none;
+    }
+
+    #hero-text .title {
+      font-size: clamp(2.5rem, 5vw, 4.5rem);
+      font-weight: 200;
+      color: #ffffff;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      line-height: 1;
+      transform: translateX(-30px);
+      opacity: 0;
+      transition: transform 1s cubic-bezier(0.16, 1, 0.3, 1), opacity 1s ease;
+    }
+
+    #hero-text .divider {
+      width: 50px;
+      height: 1px;
+      background: rgba(255,255,255,0.3);
+      margin: 1.6rem 0;
+      transform: scaleX(0);
+      transform-origin: left center;
+      opacity: 0;
+      transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.15s, opacity 0.8s ease 0.15s;
+    }
+
+    #hero-text .subtitle {
+      font-size: clamp(0.6rem, 1.1vw, 0.8rem);
+      font-weight: 300;
+      color: rgba(255,255,255,0.4);
+      letter-spacing: 0.45em;
+      text-transform: uppercase;
+      transform: translateX(-20px);
+      opacity: 0;
+      transition: transform 1s cubic-bezier(0.16, 1, 0.3, 1) 0.25s, opacity 1s ease 0.25s;
+    }
+
+    #hero-text.visible .title {
+      transform: translateX(0);
+      opacity: 1;
+    }
+
+    #hero-text.visible .divider {
+      transform: scaleX(1);
+      opacity: 1;
+    }
+
+    #hero-text.visible .subtitle {
+      transform: translateX(0);
+      opacity: 1;
+    }
+
+    #side-tag {
+      position: fixed;
+      top: 50%;
+      right: 6vw;
+      transform: translateY(-50%);
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.6rem;
+      opacity: 0;
+      transition: opacity 0.8s ease 0.4s;
+    }
+
+    #side-tag.visible {
+      opacity: 1;
+    }
+
+    .side-tag-line {
+      font-size: 0.58rem;
+      letter-spacing: 0.38em;
+      color: rgba(255,255,255,0.25);
+      text-transform: uppercase;
+      text-align: right;
+    }
+
+    .side-tag-line strong {
+      color: rgba(255,255,255,0.55);
+      font-weight: 400;
+    }
+
+    .side-tag-bar {
+      width: 1px;
+      height: 50px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.25), transparent);
+      align-self: flex-end;
+    }
+
+    #scroll-hint {
+      position: fixed;
+      bottom: 2.5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      opacity: 1;
+      transition: opacity 0.5s ease;
+    }
+
+    #scroll-hint.hidden {
+      opacity: 0;
+    }
+
+    #scroll-hint span {
+      font-size: 0.6rem;
+      letter-spacing: 0.4em;
+      color: rgba(255,255,255,0.25);
+      text-transform: uppercase;
+    }
+
+    .scroll-line {
+      width: 1px;
+      height: 40px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.3), transparent);
+      animation: scrollPulse 1.8s ease-in-out infinite;
+    }
+
+    @keyframes scrollPulse {
+      0%, 100% { opacity: 0.3; transform: scaleY(1); }
+      50% { opacity: 1; transform: scaleY(1.2); }
+    }
+
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      background: #101010;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 1.5rem;
+      transition: opacity 0.8s ease;
+    }
+
+    #loading-screen.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-bar-track {
+      width: 160px;
+      height: 1px;
+      background: rgba(255,255,255,0.1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .loading-bar-fill {
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: rgba(255,255,255,0.6);
+      animation: loadingSlide 1.5s ease-in-out infinite;
+    }
+
+    @keyframes loadingSlide {
+      0% { left: -100%; }
+      100% { left: 100%; }
+    }
+
+    .loading-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.5em;
+      color: rgba(255,255,255,0.2);
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading-screen">
+  <div class="loading-bar-track"><div class="loading-bar-fill"></div></div>
+  <div class="loading-label">Loading</div>
+</div>
+
+<div id="scroll-container">
+  <div id="canvas-wrapper">
+    <canvas id="three-canvas"></canvas>
+  </div>
+</div>
+
+<div id="hero-text">
+  <div class="title">Hexaquad</div>
+  <div class="divider"></div>
+  <div class="subtitle">Autonomous Precision Flight System</div>
+</div>
+
+<div id="side-tag">
+  <div class="side-tag-line"><strong>Model</strong> HXQ-6</div>
+  <div class="side-tag-line"><strong>Class</strong> Hex-Rotor</div>
+  <div class="side-tag-line"><strong>Range</strong> 12 km</div>
+  <div class="side-tag-bar"></div>
+</div>
+
+<div id="scroll-hint">
+  <div class="scroll-line"></div>
+  <span>Scroll</span>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+// Scene setup
+const canvas = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101010);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 2000);
+camera.position.set(0, 0, 5);
+
+// Lighting
+// Ambient - very low
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.04);
+scene.add(ambientLight);
+
+// Top subtle fill
+const topLight = new THREE.DirectionalLight(0xffffff, 0.15);
+topLight.position.set(0, 10, 5);
+scene.add(topLight);
+
+// Rim light - left
+const rimLeft = new THREE.DirectionalLight(0xffffff, 1.2);
+rimLeft.position.set(-6, 2, -3);
+scene.add(rimLeft);
+
+// Rim light - right
+const rimRight = new THREE.DirectionalLight(0xffffff, 0.9);
+rimRight.position.set(6, 2, -3);
+scene.add(rimRight);
+
+// Subtle top rim
+const rimTop = new THREE.DirectionalLight(0xffffff, 0.5);
+rimTop.position.set(0, 8, -4);
+scene.add(rimTop);
+
+// Very faint front fill to see detail
+const frontFill = new THREE.DirectionalLight(0xffffff, 0.06);
+frontFill.position.set(0, 0, 10);
+scene.add(frontFill);
+
+// Material - matte black
+const matteMaterial = new THREE.MeshStandardMaterial({
+  color: 0x1a1a1a,
+  roughness: 0.88,
+  metalness: 0.05,
+  envMapIntensity: 0.1,
+});
+
+// Drone group
+const droneGroup = new THREE.Group();
+const pivotGroup = new THREE.Group();
+pivotGroup.add(droneGroup);
+scene.add(pivotGroup);
+
+// Propeller references
+const propellers = [];
+
+// State
+let droneLoaded = false;
+let scrollProgress = 0;
+let mouseNDC = new THREE.Vector2(0, 0);
+let smoothMouseNDC = new THREE.Vector2(0, 0);
+let targetMouseNDC = new THREE.Vector2(0, 0);
+const heroText = document.getElementById('hero-text');
+const sideTag = document.getElementById('side-tag');
+const scrollHint = document.getElementById('scroll-hint');
+
+// Continuous Y rotation state
+let droneBaseRotationY = 0;
+
+// Load GLB
+const modelData = window.UPLOADED_3D_MODELS?.find(m => m.name === 'Drone.glb');
+if (modelData) {
+  const dracoLoader = new DRACOLoader();
+  dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+  const loader = new GLTFLoader();
+  loader.setDRACOLoader(dracoLoader);
+  loader.load(modelData.dataUrl, (gltf) => {
+    const model = gltf.scene;
+
+    // Center and scale
+    const bbox = new THREE.Box3().setFromObject(model);
+    const center = new THREE.Vector3();
+    bbox.getCenter(center);
+    model.position.sub(center);
+
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const targetSize = 2.2;
+    const scaleFactor = targetSize / maxDim;
+    model.scale.setScalar(scaleFactor);
+
+    // Override all meshes with matte black material; detect propellers by name
+    model.traverse((child) => {
+      if (child.isMesh) {
+        child.material = matteMaterial;
+        child.castShadow = true;
+        child.receiveShadow = false;
+      }
+      // Detect propeller objects by common naming conventions
+      if (child.isMesh || child.isObject3D) {
+        const n = child.name.toLowerCase();
+        if (
+          n.includes('prop') ||
+          n.includes('rotor') ||
+          n.includes('blade') ||
+          n.includes('fan') ||
+          n.includes('spin') ||
+          n.includes('arm')
+        ) {
+          propellers.push(child);
+        }
+      }
+    });
+
+    droneGroup.add(model);
+    droneLoaded = true;
+
+    setTimeout(() => {
+      const loadingScreen = document.getElementById('loading-screen');
+      loadingScreen.classList.add('fade-out');
+      setTimeout(() => loadingScreen.remove(), 800);
+    }, 400);
+  }, undefined, (err) => {
+    console.error('GLB load error:', err);
+    // Fallback
+    const geo = new THREE.OctahedronGeometry(1.2, 2);
+    const mesh = new THREE.Mesh(geo, matteMaterial);
+    droneGroup.add(mesh);
+    droneLoaded = true;
+    const loadingScreen = document.getElementById('loading-screen');
+    loadingScreen.classList.add('fade-out');
+    setTimeout(() => loadingScreen.remove(), 800);
+  });
+} else {
+  // Fallback
+  const geo = new THREE.OctahedronGeometry(1.2, 2);
+  const mesh = new THREE.Mesh(geo, matteMaterial);
+  droneGroup.add(mesh);
+  droneLoaded = true;
+  const loadingScreen = document.getElementById('loading-screen');
+  loadingScreen.classList.add('fade-out');
+  setTimeout(() => loadingScreen.remove(), 800);
+}
+
+// Mouse tracking
+document.addEventListener('mousemove', (e) => {
+  targetMouseNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+  targetMouseNDC.y = -((e.clientY / window.innerHeight) * 2 - 1);
+});
+
+// Scroll
+let lastScrollY = 0;
+const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+
+window.addEventListener('scroll', () => {
+  const sy = window.scrollY;
+  scrollProgress = Math.min(sy / (maxScroll * 0.6), 1);
+
+  if (scrollProgress > 0.12) {
+    scrollHint.classList.add('hidden');
+    heroText.style.opacity = '1';
+    heroText.classList.add('visible');
+    sideTag.classList.add('visible');
+  } else {
+    scrollHint.classList.remove('hidden');
+    heroText.classList.remove('visible');
+    heroText.style.opacity = '0';
+    sideTag.classList.remove('visible');
+  }
+
+  lastScrollY = sy;
+}, { passive: true });
+
+// Resize
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Hover float animation
+let floatTime = 0;
+
+// Animation loop
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  floatTime += delta;
+
+  // Smooth mouse
+  smoothMouseNDC.x += (targetMouseNDC.x - smoothMouseNDC.x) * 0.04;
+  smoothMouseNDC.y += (targetMouseNDC.y - smoothMouseNDC.y) * 0.04;
+
+  if (droneLoaded) {
+    // Continuous slow rotation on Y axis (angle-by-angle showcase)
+    const rotSpeed = 0.28; // radians per second
+    droneBaseRotationY += delta * rotSpeed;
+
+    // LookAt mouse tilt layered on top of base rotation
+    const maxTiltYaw = 0.18;
+    const maxTiltPitch = 0.12;
+    pivotGroup.rotation.y = droneBaseRotationY + smoothMouseNDC.x * maxTiltYaw;
+    pivotGroup.rotation.x = -smoothMouseNDC.y * maxTiltPitch;
+
+    // Propeller spin - fast constant rotation on local Y axis
+    const propSpeed = delta * 22;
+    propellers.forEach((p) => {
+      p.rotation.y += propSpeed;
+    });
+
+    // Gentle hover float (reduced during scroll)
+    const floatAmt = 0.04 * (1 - scrollProgress * 0.8);
+    droneGroup.position.y = Math.sin(floatTime * 0.8) * floatAmt;
+
+    // Scroll: Z-axis retreat + slight scale down
+    const zRetreat = scrollProgress * -18;
+    const scaleDown = 1 - scrollProgress * 0.35;
+
+    pivotGroup.position.z = zRetreat;
+    pivotGroup.scale.setScalar(scaleDown);
+
+    // Slight upward drift as it recedes
+    pivotGroup.position.y = scrollProgress * 0.3;
+  }
+
+  renderer.render(scene, camera);
+}
+
+animate();
+</script>
+</body>
+</html>
