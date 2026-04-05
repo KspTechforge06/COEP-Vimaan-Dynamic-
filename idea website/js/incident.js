@@ -35,7 +35,7 @@
       this.y     = y != null ? y : 50 + Math.random() * icH * .7;
       this.age   = 0;
       this.alive = true;
-      const types = [['FIRE', '255,80,40'], ['FLOOD', '40,140,255'], ['MEDICAL', '0,255,136']];
+      const types = [['CRITICAL', '255,80,40'], ['HIGH', '40,140,255'], ['MEDIUM', '0,255,136']];
       const type  = types[Math.floor(Math.random() * 3)];
       this.type = type[0];
       this.col  = type[1];

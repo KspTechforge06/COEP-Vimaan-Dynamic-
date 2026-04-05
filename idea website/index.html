@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Vimaan Dynamic — AI Drone Urban Safety</title>
+  <title>Vimaan Dynamic — AI-Powered Emergency Drone Response</title>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -73,11 +73,12 @@
       <div>
         <div class="hero-tag">Vimaan Dynamic · Urban Safety AI</div>
         <h1 class="hero-title">
-          Autonomous Drone<br /><span>Response Platform</span>
+          AI-Powered Emergency<br /><span>Drone Response</span>
         </h1>
         <p class="hero-sub">
-          AI-powered simulation infrastructure for autonomous drone-based
-          emergency response across urban environments.
+          A fully simulated command platform — AI incident detection on CCTV feeds,
+          intelligent weighted dispatch, and a live tactical city map.
+          Zero manual steps.
         </p>
         <div class="hero-cta">
           <a href="#cta" class="btn-deploy" id="deploy-btn">⬡ &nbsp;Deploy Simulation</a>
@@ -90,101 +91,115 @@
       </div>
     </section>
 
-    <!-- ── MISSION ── -->
+    <!-- ── THE PROBLEM ── -->
     <section class="section" id="mission">
       <div class="section-inner">
         <div class="info-card" data-reveal>
-          <div class="card-num">01 · Mission</div>
-          <h2 class="card-title">Urban Safety,<br /><em>Redefined</em></h2>
+          <div class="card-num">01 · The Problem</div>
+          <h2 class="card-title">Urban Safety Needs<br /><em>Smarter Automation</em></h2>
           <p class="card-body">
-            Cities face critical response gaps — fires, medical emergencies,
-            and security incidents where every second counts. Vimaan Dynamic
-            deploys AI-powered autonomous drones that reach any urban location
-            within minutes, with zero human risk during the first response window.
+           Current emergency response systems lack an intelligent, automated dispatch layer. 
+           There is no standard way to select, score, and deploy a drone to an urban incident
+           based on distance, battery, and severity — simultaneously and without human intervention.
+
+
           </p>
           <div class="card-tags">
-            <span class="tag">Zero Delay</span>
-            <span class="tag">AI Navigation</span>
-            <span class="tag">24/7 Coverage</span>
+            <span class="tag">Manual Delay</span>
+            <span class="tag">No Spatial Awareness</span>
+            <span class="tag">Human Bottleneck</span>
           </div>
         </div>
         <div class="visual-side" data-reveal-right>
           <div class="vis-box"><canvas class="hud-canvas" id="canvas-mission"></canvas></div>
           <div class="stat-row">
             <div class="stat">
-              <div class="stat-val" data-count="3" data-suffix="x">0x</div>
-              <div class="stat-lbl">Faster Response</div>
-            </div>
-            <div class="stat">
-              <div class="stat-val" data-count="94" data-suffix="%">0%</div>
-              <div class="stat-lbl">Coverage Rate</div>
+              <div class="stat-val">~400ms</div>
+              <div class="stat-lbl">Automated Dispatch</div>
             </div>
             <div class="stat">
               <div class="stat-val">0</div>
-              <div class="stat-lbl">Human Risk</div>
+              <div class="stat-lbl">Manual Steps</div>
+            </div>
+            <div class="stat">
+              <div class="stat-val">3</div>
+              <div class="stat-lbl">Severity Levels</div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ── PLATFORM ── -->
+    <!-- ── THE SOLUTION ── -->
     <section class="section" id="platform">
       <div class="section-inner rev">
         <div class="info-card" data-reveal>
-          <div class="card-num">02 · Platform</div>
-          <h2 class="card-title">Simulation-<br /><em>First</em> Design</h2>
+          <div class="card-num">02 · The Solution</div>
+          <h2 class="card-title">Fully Automated<br /><em>AI → Dispatch → Track</em></h2>
           <p class="card-body">
-            Our web-based simulation platform lets city planners, emergency
-            services, and researchers test autonomous drone fleets across
-            photorealistic urban environments — before a single real drone takes
-            flight. Model disasters, optimize routes, and validate safety
-            protocols at scale.
+            Vimaan Dynamic detects incidents from simulated CCTV feeds using AI,
+            classifies them by severity — CRITICAL / HIGH / MEDIUM — and dispatches
+            the optimal drone in ~400ms. No human in the loop, ever.
+            <br /><br />
+            <span style="font-size:12px;letter-spacing:.08em;color:var(--accent);font-family:'Syne',sans-serif;">
+              CCTV → Detection → Event Bus → Dispatch → Tactical Map → Incident Queue
+            </span>
           </p>
           <div class="card-tags">
-            <span class="tag">Digital Twin</span>
-            <span class="tag">Real-time Sim</span>
-            <span class="tag">Multi-agent</span>
+            <span class="tag">YOLOv8-style Detection</span>
+            <span class="tag">Event-Driven</span>
+            <span class="tag">Zero Manual Steps</span>
           </div>
         </div>
         <div class="visual-side" data-reveal-right>
           <div class="vis-box"><canvas class="hud-canvas" id="canvas-platform"></canvas></div>
           <div class="stat-row">
-            <div class="stat">
-              <div class="stat-val" data-count="50" data-suffix="+">0+</div>
-              <div class="stat-lbl">Scenarios</div>
-            </div>
-            <div class="stat"><div class="stat-val">Real-time</div><div class="stat-lbl">Physics</div></div>
-            <div class="stat"><div class="stat-val">Fleet</div><div class="stat-lbl">Coordination</div></div>
+            <div class="stat"><div class="stat-val">CRITICAL</div><div class="stat-lbl">Highest Priority</div></div>
+            <div class="stat"><div class="stat-val">Live</div><div class="stat-lbl">Tactical Map</div></div>
+            <div class="stat"><div class="stat-val">Auto</div><div class="stat-lbl">Re-dispatch</div></div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ── TECH ── -->
+    <!-- ── DISPATCH INTELLIGENCE ── -->
     <section class="section" id="tech">
       <div class="section-inner">
         <div class="info-card" data-reveal>
           <div class="card-num">03 · Intelligence</div>
-          <h2 class="card-title">AI That<br /><em>Thinks Fast</em></h2>
+          <h2 class="card-title">Smart Dispatch,<br /><em>Not Just Nearest</em></h2>
           <p class="card-body">
-            Onboard edge AI processes real-time sensor data — thermal imaging,
-            object detection, obstacle mapping — making autonomous decisions in
-            milliseconds. Our reinforcement learning models are trained entirely
-            within the simulation, deployed to real hardware with zero retraining.
+            Our weighted composite scoring considers distance, battery level, and
+            incident severity together. A closer drone with 18% battery loses to a
+            farther drone at 92% — every time. CRITICAL incidents get zero severity
+            penalty, always claiming the best available unit.
           </p>
-          <div class="card-tags">
-            <span class="tag">Edge AI</span>
-            <span class="tag">Thermal Vision</span>
-            <span class="tag">RL Trained</span>
+          <div class="dispatch-table">
+            <div class="dt-row dt-head">
+              <span>Drone</span><span>Distance</span><span>Battery</span><span>Score</span>
+            </div>
+            <div class="dt-row dt-win">
+              <span>KITE-1</span><span>0.18</span><span>92%</span><span>0.114 ✓</span>
+            </div>
+            <div class="dt-row">
+              <span>HAWK-2</span><span>0.09</span><span>18%</span><span>0.291 ✗</span>
+            </div>
+            <div class="dt-row">
+              <span>RAVEN-1</span><span>0.41</span><span>87%</span><span>0.244 ✗</span>
+            </div>
+          </div>
+          <div class="card-tags" style="margin-top:18px">
+            <span class="tag">Composite Scoring</span>
+            <span class="tag">Atomic Dispatch Lock</span>
+            <span class="tag">Priority Re-dispatch</span>
           </div>
         </div>
         <div class="visual-side" data-reveal-right>
           <div class="vis-box"><canvas class="hud-canvas" id="canvas-tech"></canvas></div>
           <div class="stat-row">
-            <div class="stat"><div class="stat-val">&lt;80ms</div><div class="stat-lbl">Decision Time</div></div>
-            <div class="stat"><div class="stat-val">360°</div><div class="stat-lbl">Perception</div></div>
-            <div class="stat"><div class="stat-val">Sim→Real</div><div class="stat-lbl">Transfer</div></div>
+            <div class="stat"><div class="stat-val">&lt;400ms</div><div class="stat-lbl">Decision Time</div></div>
+            <div class="stat"><div class="stat-val">A*</div><div class="stat-lbl">Navigation</div></div>
+            <div class="stat"><div class="stat-val">Race-safe</div><div class="stat-lbl">Dispatch Lock</div></div>
           </div>
         </div>
       </div>
@@ -200,30 +215,32 @@
       </div>
     </section>
 
-    <!-- ── IMPACT ── -->
+    <!-- ── TECH STACK ── -->
     <section class="section" id="impact">
       <div class="section-inner rev">
         <div class="info-card" data-reveal>
-          <div class="card-num">04 · Impact</div>
-          <h2 class="card-title">Cities That<br /><em>Never Sleep</em></h2>
+          <div class="card-num">04 · Tech Stack</div>
+          <h2 class="card-title">Built on<br /><em>Real Technology</em></h2>
           <p class="card-body">
-            From flood response to wildfire containment to medical supply drops
-            — Vimaan's fleet operates around the clock. Our platform integrates
-            directly with city emergency dispatch systems, auto-deploying the
-            nearest drone the moment an incident is flagged.
+            Modular drone intelligence stack — YOLOv8-powered real-time detection, V Geo Mapper for live spatial
+            mapping, and a Geo-Fence Checker ensuring compliant autonomous operations.Smart navigation layer with
+            Route Planner + MAVSDK, integrated with ROS and PX4/ArduPilot for seamless simulation-to-deployment control.
           </p>
           <div class="card-tags">
-            <span class="tag">Flood Response</span>
-            <span class="tag">Fire Recon</span>
-            <span class="tag">Medical Drop</span>
+            <span class="tag">YOLO V8</span>
+            <span class="tag">V GEO MAPPER</span>
+            <span class="tag">GEOFENCE CHECKER</span>
+            <span class="tag">ROUTE PLANNER</span>
+            <span class="tag">MAV SDK</span>
+            <span class="tag">ROS</span>
           </div>
         </div>
         <div class="visual-side" data-reveal-right>
           <div class="vis-box"><canvas class="hud-canvas" id="canvas-impact"></canvas></div>
           <div class="stat-row">
-            <div class="stat"><div class="stat-val">∞</div><div class="stat-lbl">Use Cases</div></div>
-            <div class="stat"><div class="stat-val">Auto</div><div class="stat-lbl">Dispatch</div></div>
-            <div class="stat"><div class="stat-val">City-wide</div><div class="stat-lbl">Coverage</div></div>
+            <div class="stat"><div class="stat-val">USD 451B</div><div class="stat-lbl">Market by 2034</div></div>
+            <div class="stat"><div class="stat-val">11.42%</div><div class="stat-lbl">CAGR 2025–34</div></div>
+            <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">Hardware Cost</div></div>
           </div>
         </div>
       </div>
@@ -235,15 +252,15 @@
         <p style="font-size:11px;letter-spacing:.4em;color:var(--accent2);text-transform:uppercase;margin-bottom:14px">
           By The Numbers
         </p>
-        <h2 class="light-title">Real Impact,<br /><span>Real Cities</span></h2>
+        <h2 class="light-title">Real Impact,<br /><span>Real Numbers</span></h2>
         <p class="light-body">
-          Validated across 12 metropolitan environments. The data speaks for itself.
+          The data behind Vimaan Dynamic — from dispatch speed to market opportunity.
         </p>
         <div class="metrics-row">
-          <div class="metric"><div class="metric-val">2.4min</div><div class="metric-lbl">Avg Response</div></div>
-          <div class="metric"><div class="metric-val">99.2%</div><div class="metric-lbl">Uptime</div></div>
-          <div class="metric"><div class="metric-val">12</div><div class="metric-lbl">Cities Simulated</div></div>
-          <div class="metric"><div class="metric-val">0</div><div class="metric-lbl">Collisions in Sim</div></div>
+          <div class="metric"><div class="metric-val">~400ms</div><div class="metric-lbl">Automated Dispatch</div></div>
+          <div class="metric"><div class="metric-val">0</div><div class="metric-lbl">Manual Steps</div></div>
+          <div class="metric"><div class="metric-val">3</div><div class="metric-lbl">Severity Levels</div></div>
+          <div class="metric"><div class="metric-val">USD 451B</div><div class="metric-lbl">Market by 2034</div></div>
         </div>
       </div>
     </section>
@@ -264,27 +281,27 @@
     <!-- ── TEAM ── -->
     <section id="team">
       <div class="team-title">Team <span>Vimaan Dynamic</span></div>
-      <p class="team-sub">Building the future of autonomous urban safety</p>
+      <p class="team-sub">From fundamentals to field-ready systems — engineering with purpose.</p>
       <div class="team-grid">
         <div class="member-card">
-          <div class="member-avatar">PL</div>
-          <div class="member-name">Pilot Lead</div>
-          <div class="member-role">Systems &amp; AI</div>
+          <div class="member-avatar">ND</div>
+          <div class="member-name">Nandan Doshi</div>
+          <div class="member-role">1st Year · CSE</div>
         </div>
         <div class="member-card">
-          <div class="member-avatar">SE</div>
-          <div class="member-name">Sim Engineer</div>
-          <div class="member-role">Platform Dev</div>
+          <div class="member-avatar">PK</div>
+          <div class="member-name">Prajwal Kamble</div>
+          <div class="member-role">1st Year · CSE</div>
         </div>
         <div class="member-card">
-          <div class="member-avatar">ML</div>
-          <div class="member-name">ML Engineer</div>
-          <div class="member-role">RL &amp; Vision</div>
+          <div class="member-avatar">SS</div>
+          <div class="member-name">Shreelekha Swain</div>
+          <div class="member-role">2nd Year · CSE</div>
         </div>
         <div class="member-card">
-          <div class="member-avatar">UX</div>
-          <div class="member-name">UI/UX Lead</div>
-          <div class="member-role">Design &amp; Web</div>
+          <div class="member-avatar">SJ</div>
+          <div class="member-name">Sarthak Jadhav</div>
+          <div class="member-role">1st Year · Mechanical</div>
         </div>
       </div>
     </section>
@@ -295,7 +312,7 @@
         <div class="cta-label">Vimaan Dynamic · Hackathon 2025</div>
         <h2 class="cta-title">Ready to Deploy?</h2>
         <p class="cta-sub">
-          Launch the simulation. Experience the future of urban emergency response.
+          Launch the simulation. See AI dispatch a drone to a CRITICAL incident in under 400ms.
         </p>
         <div class="cta-buttons">
           <a href="#hero" class="cta-btn-primary">⬡ &nbsp;Launch Simulation</a>

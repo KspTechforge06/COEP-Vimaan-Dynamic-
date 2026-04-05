@@ -680,6 +680,38 @@ nav {
 }
 .cta-btn-ghost:hover { background: rgba(0, 245, 255, 0.07); }
 
+/* ── Dispatch scoring table ── */
+.dispatch-table {
+  margin-top: 20px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-family: 'Syne', sans-serif;
+  font-size: 12px;
+}
+.dt-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--card-border);
+  gap: 8px;
+}
+.dt-row:last-child { border-bottom: none; }
+.dt-head {
+  background: rgba(0,245,255,0.06);
+  color: var(--accent);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.dt-win {
+  background: rgba(0,255,136,0.05);
+  color: var(--accent3);
+}
+.dt-row:not(.dt-head):not(.dt-win) {
+  color: var(--muted);
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .section-inner               { grid-template-columns: 1fr; gap: 40px; }
