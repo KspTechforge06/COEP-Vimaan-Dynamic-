@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIMAAN DYNAMIC v2 — Urban Drone Response Command</title>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<!-- App Styles -->
+<link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+
+header>
+  <div class="header-brand">
+    <div class="brand-logo">
+      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="10,1 19,7 19,13 10,19 1,13 1,7" fill="none" stroke="#f0f0f0" stroke-width="1.2" opacity=".6"/>
+        <circle cx="10" cy="10" r="3.5" fill="none" stroke="#f0f0f0" stroke-width="1.2"/>
+        <circle cx="10" cy="10" r="1.2" fill="#f0f0f0"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-name">VIMAAN DYNAMIC</div>
+      <div class="brand-sub"></div>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" id="tabDash" onclick="switchTab('dash')">DASHBOARD</button>
+      <button class="nav-tab" id="tabSim"  onclick="switchTab('sim')">SIMULATION</button>
+    </div>
+  </div>
+
+  <div class="header-status">
+    <div class="hstat"><span class="dot"></span>SYSTEM NOMINAL</div>
+    <div class="hstat"><span class="dot red" id="incidentDot"></span><span id="headerAlert">0 ACTIVE INCIDENTS</span></div>
+    <div class="hstat"><span class="dot dim" id="aiDot"></span><span id="aiStatus">YOLO: LOADING</span></div>
+    <div class="hstat"><span class="dot warn" id="rosDot"></span><span id="rosStatus">ROS: CONNECTING</span></div>
+    <div class="hstat"><span class="dot" id="boundaryDot" style="background:var(--accent-ok)"></span><span id="boundaryStatus">BOUNDARY: SECURE</span></div>
+    <div class="hstat">GRID: <span style="color:var(--accent-ok)">PUNE SECTOR</span></div>
+    <div class="clock" id="clockEl">00:00:00</div>
+  </div>
+</header>
+
+<!-- ═══════════════════ DASHBOARD TAB ═══════════════════ -->
+<div class="main" id="dashView">
+
+  <!-- LEFT: DRONE FLEET -->
+  <div class="panel fleet-panel" id="fleetPanel">
+    <div class="panel-header">
+      <div class="ph-left">
+        <button class="collapse-btn" id="collapseLeft" onclick="togglePanel('left')">◀</button>
+        <span class="panel-title">DRONE FLEET</span>
+      </div>
+      <div class="ph-right">
+        <span class="panel-badge badge-white" id="fleetCount">6 UNITS</span>
+      </div>
+      <div class="panel-vtitle">DRONE FLEET</div>
+    </div>
+    <div class="drone-list" id="droneList"></div>
+
+    <!-- ★ NEW: Drone & Station Coordinates Panel -->
+    <div class="drone-coords-panel" id="droneCoordsPanel">
+      <div class="drone-coords-title">LIVE POSITIONS</div>
+      <div id="droneCoordsRows"><!-- populated by JS --></div>
+    </div>
+
+    <div class="stat-strip">
+      <div class="sstrip">STANDBY <span id="activeCount">0</span></div>
+      <div class="sstrip">DISPATCHED <span id="dispatchCount">0</span></div>
+      <div class="sstrip">AVOIDING <span id="avoidingCount">0</span></div>
+    </div>
+  </div>
+
+  <div class="center-right">
+    <div class="top-row">
+      <!-- MAP -->
+      <div class="panel map-panel grey-mode" id="mapPanel">
+        <div id="leafletMap"></div>
+
+        <div class="map-overlay">
+          <div class="map-tag">◈ LIVE TACTICAL MAP — PUNE URBAN SECTOR</div>
+          <div class="map-tag" id="mapZone">ZONE: CENTRAL GRID</div>
+          <div class="map-tag" id="geoStatus" style="color:var(--accent-geo)">GEOFENCE: 3 ZONES ACTIVE</div>
+          <div class="map-tag" id="boundaryTag" style="color:var(--accent-ok)">BOUNDARY: OPERATIONAL — ALL CLEAR</div>
+          <div class="map-tag" id="obstacleTag" style="color:var(--text-secondary)">OBSTACLES: 8 STRUCTURES MAPPED</div>
+        </div>
+
+        <!-- ★ NEW: Map View Mode Switcher -->
+        <div class="map-mode-switcher">
+          <div class="map-mode-label">MAP VIEW</div>
+          <button class="map-mode-btn active" id="modeGrey"      onclick="setMapMode('grey')">▦ GREY</button>
+          <button class="map-mode-btn"        id="modeDark"      onclick="setMapMode('dark')">◼ DARK</button>
+          <button class="map-mode-btn"        id="modeSatellite" onclick="setMapMode('satellite')">◈ SATELLITE</button>
+          <button class="map-mode-btn"        id="modeTerrain"   onclick="setMapMode('terrain')">◭ TERRAIN</button>
+        </div>
+
+        <!-- ★ NEW: Live Drone Position Display on Map -->
+        <div class="drone-pos-display" id="dronePosDisplay">
+          <div class="drone-pos-header">▸ LIVE DRONE POSITIONS</div>
+          <div id="dronePosRows"><!-- populated by JS --></div>
+        </div>
+
+        <div class="coords-display" id="coordsDisplay">LAT: 18.5204° N | LNG: 73.8567° E | ALT: 580m</div>
+
+        <div class="map-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--accent-ok)"></div> STANDBY</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--accent-drone)"></div> DISPATCHED</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--accent-danger)"></div> INCIDENT</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--accent-geo)"></div> GEOFENCE</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--accent-blue)"></div> CCTV NODE</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#a855f7"></div> BOUNDARY</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#64748b"></div> OBSTACLE</div>
+        </div>
+      </div>
+
+      <!-- RIGHT: INCIDENTS -->
+      <div class="panel incident-panel" id="incidentPanel">
+        <div class="panel-header">
+          <div class="ph-left">
+            <span class="panel-title">INCIDENT QUEUE</span>
+          </div>
+          <div class="ph-right">
+            <span class="panel-badge badge-red" id="incidentBadge">0 ALERTS</span>
+          </div>
+          <button class="collapse-btn" id="collapseRight" onclick="togglePanel('right')" style="margin-left:6px;flex-shrink:0;">▶</button>
+          <div class="panel-vtitle">INCIDENT QUEUE</div>
+        </div>
+        <div class="incident-list" id="incidentList">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);text-align:center;padding:20px;">
+            MONITORING — NO INCIDENTS<br><br>
+            <span style="font-size:8px">Scanning all feeds</span>
+          </div>
+        </div>
+        <div class="sim-controls">
+          <button class="sim-btn" onclick="triggerRandomIncident()">⚡ SIMULATE</button>
+          <button class="sim-btn danger" onclick="clearAllIncidents()">✕ CLEAR</button>
+          <button class="sim-btn" id="autoBtn" onclick="toggleAuto()">AUTO: OFF</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom-row" id="bottomRow">
+      <div class="video-panel" id="videoPanel">
+        <div class="feed-container">
+          <div class="panel-header" style="flex-shrink:0;">
+            <div class="ph-left">
+              <button class="collapse-btn" id="collapseBottom" onclick="togglePanel('bottom')">▼</button>
+              <span class="panel-title">CCTV FEEDS — YOLO DETECTION ACTIVE</span>
+            </div>
+            <div class="ph-right">
+              <span class="panel-badge badge-yolo">YOLOv8</span>
+              <span class="panel-badge badge-blue">4 CAMERAS</span>
+            </div>
+          </div>
+          <div class="feeds-grid" id="feedsGrid"></div>
+        </div>
+      </div>
+
+      <div class="panel log-panel" id="logPanel">
+        <div class="panel-header">
+          <div class="ph-left">
+            <button class="collapse-btn" id="collapseLog" onclick="togglePanel('log')">▶</button>
+            <span class="panel-title">SYSTEM LOG</span>
+          </div>
+          <div class="ph-right">
+            <span class="panel-badge badge-green" id="logBadge">LIVE</span>
+          </div>
+          <div class="panel-vtitle">SYSTEM LOG</div>
+        </div>
+        <div class="log-list" id="logList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ SIMULATION TAB ═══════════════════ -->
+<div class="sim-view" id="simView">
+  <div class="ros-status-bar">
+    <div class="ros-dot waiting" id="rosConnDot"></div>
+    <span id="rosConnLabel" style="color:var(--text-secondary)">ROSBridge WebSocket — ws://localhost:9090 — connecting…</span>
+    <span style="margin-left:auto;color:var(--text-dim)">TOPIC: /mavros/state | /mavros/local_position/pose | /yolov8/detections</span>
+  </div>
+
+  <div class="sim-main">
+    <div class="sim-block" style="grid-column:1/3; grid-row:1/2;">
+      <div class="panel-header">
+        <div class="ph-left">
+          <span class="panel-title">PX4 GAZEBO SIMULATION — MAVSDK CONTROL</span>
+        </div>
+        <div class="ph-right">
+          <span class="panel-badge badge-blue" id="px4ModeBadge">MODE: OFFBOARD</span>
+          <span class="panel-badge badge-yolo" id="yoloBadge">YOLO: ACTIVE</span>
+        </div>
+      </div>
+      <div class="sim-canvas-wrap">
+        <canvas id="px4Canvas"></canvas>
+        <canvas id="yoloOverlay" style="position:absolute;inset:0;pointer-events:none;"></canvas>
+      </div>
+      <div class="mavlink-strip" id="mavlinkStrip">
+        <div class="mav-cell">ARMED <span class="mav-val mav-ok" id="mavArmed">YES</span></div>
+        <div class="mav-cell">MODE <span class="mav-val mav-ok" id="mavMode">OFFBOARD</span></div>
+        <div class="mav-cell">ALT <span class="mav-val" id="mavAlt">42.3m</span></div>
+        <div class="mav-cell">SPEED <span class="mav-val" id="mavSpeed">3.2 m/s</span></div>
+        <div class="mav-cell">HEADING <span class="mav-val" id="mavHdg">NNE 24°</span></div>
+        <div class="mav-cell">BATTERY <span class="mav-val mav-ok" id="mavBat">87%</span></div>
+        <div class="mav-cell">GPS <span class="mav-val mav-ok">LOCK 12sat</span></div>
+        <div class="mav-cell">GEOFENCE <span class="mav-val" id="mavGeo" style="color:var(--accent-ok)">CLEAR</span></div>
+      </div>
+    </div>
+
+    <div class="sim-block" style="grid-column:1/2; grid-row:2/3;">
+      <div class="panel-header">
+        <div class="ph-left"><span class="panel-title">ROSBridge — LIVE DRONE CAMERA</span></div>
+        <div class="ph-right"><span class="panel-badge badge-blue" id="rosFeedBadge">TOPIC: /camera/image_raw</span></div>
+      </div>
+      <div style="flex:1;position:relative;background:#000;overflow:hidden;">
+        <canvas id="rosFeedCanvas" style="width:100%;height:100%;display:block;"></canvas>
+        <div class="ros-badge" id="rosFeedStatus">● SIMULATED</div>
+        <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.8));padding:4px 8px;font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--text-secondary);display:flex;justify-content:space-between;">
+          <span id="rosFeedLabel">DRONE-CAM-1 / FRONT</span>
+          <span id="rosFeedFps">24fps</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sim-block" style="grid-column:2/3; grid-row:2/3;">
+      <div class="panel-header">
+        <div class="ph-left"><span class="panel-title">YOLOv8 DETECTIONS</span></div>
+        <div class="ph-right"><span class="panel-badge badge-yolo" id="yoloCount">0 OBJECTS</span></div>
+      </div>
+      <div class="yolo-detections" id="yoloList">
+        <div style="text-align:center;padding:20px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);">WAITING FOR DETECTIONS...</div>
+      </div>
+    </div>
+
+    <div class="sim-block sim-info-panel" style="grid-column:3/4; grid-row:1/3;">
+      <div class="panel-header">
+        <div class="ph-left"><span class="panel-title">SIM STATUS</span></div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-title">MAVSDK / PX4</div>
+        <div class="info-row"><span class="info-key">Connection</span><span class="info-val ok" id="simMavConn">udp://14540</span></div>
+        <div class="info-row"><span class="info-key">Vehicle</span><span class="info-val" id="simVehicle">X500 Quadrotor</span></div>
+        <div class="info-row"><span class="info-key">Autopilot</span><span class="info-val blue">PX4 v1.14</span></div>
+        <div class="info-row"><span class="info-key">Sim</span><span class="info-val blue">Gazebo Harmonic</span></div>
+        <div class="info-row"><span class="info-key">Frame</span><span class="info-val" id="simFrame">60fps</span></div>
+        <!-- ★ NEW: Live sim drone lat/lng -->
+        <div class="info-row"><span class="info-key">Lat / Lng</span><span class="info-val" id="simLatLng">18.5204, 73.8567</span></div>
+      </div>
+      <div class="info-card" style="flex:1; display:flex; flex-direction:column;">
+        <div class="info-card-title">GEOFENCE ZONES</div>
+        <div class="geo-zones-list" id="geoZonesList"></div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-title">YOLO CONFIG</div>
+        <div class="info-row"><span class="info-key">Model</span><span class="info-val ok">yolov8n.pt</span></div>
+        <div class="info-row"><span class="info-key">Conf thresh</span><span class="info-val">0.45</span></div>
+        <div class="info-row"><span class="info-key">Classes</span><span class="info-val">person, fire, vehicle</span></div>
+        <div class="info-row"><span class="info-key">Backend</span><span class="info-val blue">ROS2 /detections</span></div>
+        <div class="info-row"><span class="info-key">Inference</span><span class="info-val" id="yoloInf">18ms</span></div>
+      </div>
+      <div style="padding:8px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:5px;background:var(--bg-deep);flex-shrink:0;">
+        <button class="sim-btn" onclick="simTakeoff()" style="width:100%">↑ TAKEOFF</button>
+        <button class="sim-btn" onclick="simReturnHome()" style="width:100%">⌂ RETURN HOME</button>
+        <button class="sim-btn" onclick="simTriggerDetection()" style="width:100%">⚡ TRIGGER YOLO EVENT</button>
+        <button class="sim-btn danger" onclick="simEmergencyStop()" style="width:100%">✕ EMERGENCY STOP</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- External Libraries -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+
+<!-- App Logic -->
+<!-- App Modules (load order matters) -->
+<script src="js/modules/state.js"></script>
+<script src="js/modules/coords.js"></script>
+<script src="js/modules/boundary.js"></script>
+<script src="js/modules/navigation.js"></script>
+<script src="js/modules/map.js"></script>
+<script src="js/modules/ros.js"></script>
+<script src="js/modules/drones.js"></script>
+<script src="js/modules/ui.js"></script>
+<script src="js/modules/simulation.js"></script>
+<script src="js/modules/main.js"></script>
+</body>
+</html>

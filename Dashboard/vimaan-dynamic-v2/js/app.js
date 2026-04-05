@@ -1,0 +1,1106 @@
+// VIMAAN DYNAMIC v2 — Application Logic
+// Urban Drone Response Command Platform
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════════════════
+const STATE = {
+  incidents: [], incidentIdCounter: 1000,
+  drones: [], autoMode: false, autoTimer: null,
+  logEntries: [], feeds: [], animFrame: null, frameCount: 0,
+  heatPoints: [], webcamActive: false, webcamPredictions: [],
+  rosConnected: false, rosWs: null,
+  simDrone: { x:0.5, y:0.5, targetX:0.5, targetY:0.5, heading:0, speed:0.004, alt:42, armed:true, mode:'OFFBOARD', geoBreach:false },
+  yoloDetections: [],
+  simFrame: 0,
+  boundaryBreachCount: 0,
+  // ★ NEW: current map view mode
+  mapMode: 'grey',
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════════════════════════════════════════
+function switchTab(tab) {
+  document.getElementById('dashView').style.display = tab === 'dash' ? 'flex' : 'none';
+  document.getElementById('simView').style.display  = tab === 'sim'  ? 'flex' : 'none';
+  document.getElementById('tabDash').classList.toggle('active', tab === 'dash');
+  document.getElementById('tabSim').classList.toggle('active',  tab === 'sim');
+  if (tab === 'sim') { initSimCanvas(); initROSBridge(); }
+  if (tab === 'dash' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 50);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PUNE COORDINATE SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+const PUNE_BOUNDS = { latN:18.605, latS:18.435, lngW:73.775, lngE:73.955 };
+function xy2ll(x,y) {
+  return [PUNE_BOUNDS.latN - y*(PUNE_BOUNDS.latN-PUNE_BOUNDS.latS),
+          PUNE_BOUNDS.lngW + x*(PUNE_BOUNDS.lngE-PUNE_BOUNDS.lngW)];
+}
+function ll2xy(lat,lng) {
+  return { x:(lng-PUNE_BOUNDS.lngW)/(PUNE_BOUNDS.lngE-PUNE_BOUNDS.lngW),
+           y:(PUNE_BOUNDS.latN-lat)/(PUNE_BOUNDS.latN-PUNE_BOUNDS.latS) };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ★ NEW FEATURE 3: COORDINATE UTILITIES
+// Converts XY internal coords to human-readable lat/lng strings
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Convert XY [0-1] to a formatted coordinate object with lat/lng strings.
+ * Used for display in the drone coords panel, incident cards, and map tooltips.
+ */
+function xyToCoordStr(x, y) {
+  const [lat, lng] = xy2ll(x, y);
+  return {
+    lat: lat.toFixed(5),
+    lng: lng.toFixed(5),
+    display: `${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E`,
+    short:   `${lat.toFixed(3)}N ${lng.toFixed(3)}E`,
+  };
+}
+
+/**
+ * ★ NEW: Render the live drone coordinates panel (left sidebar, below drone cards).
+ * Shows: drone ID, current lat/lng, base station lat/lng.
+ * Updates every few frames via update().
+ */
+function renderDroneCoords() {
+  const container = document.getElementById('droneCoordsRows');
+  if (!container) return;
+
+  let html = '';
+  for (const d of STATE.drones) {
+    const coords = xyToCoordStr(d.x, d.y);
+    const baseCoords = xyToCoordStr(d.bx, d.by);
+    const rowClass = d.status === 'dispatched' ? 'moving' : d.status === 'avoiding' ? 'avoiding' : '';
+    // Drone current position
+    html += `<div class="drone-coord-row ${rowClass}">
+      <span class="drone-coord-id">${d.id}</span>
+      <span class="drone-coord-vals">${coords.lat}°N<br>${coords.lng}°E</span>
+    </div>`;
+    // Base station (fixed — shown smaller)
+    html += `<div class="drone-coord-row station">
+      <span class="drone-coord-id" style="font-size:7px;opacity:.6">⌂ BASE</span>
+      <span class="drone-coord-vals" style="opacity:.5;font-size:7px">${baseCoords.lat}°N<br>${baseCoords.lng}°E</span>
+    </div>`;
+  }
+  container.innerHTML = html;
+}
+
+/**
+ * ★ NEW: Render the live drone position display overlaid on the map (bottom-left of map).
+ * Compact one-row-per-drone display for quick spatial reference.
+ */
+function renderMapDronePositions() {
+  const container = document.getElementById('dronePosRows');
+  if (!container) return;
+
+  const rows = STATE.drones.map(d => {
+    const c = xyToCoordStr(d.x, d.y);
+    const statusColor =
+      d.status === 'dispatched' ? 'var(--accent-drone)'  :
+      d.status === 'returning'  ? 'var(--accent-warn)'   :
+      d.status === 'avoiding'   ? 'var(--accent-geo)'    :
+      d.status === 'on-scene'   ? 'var(--accent-ok)'     :
+                                  'var(--text-secondary)';
+    return `<div class="drone-pos-row ${d.status}">
+      <span class="drone-pos-id" style="color:${statusColor}">${d.id}</span>
+      <span class="drone-pos-coords">${c.lat}°N, ${c.lng}°E</span>
+    </div>`;
+  }).join('');
+  container.innerHTML = rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  FEATURE 1: OPERATIONAL BOUNDARY
+// ═══════════════════════════════════════════════════════════════════════════
+const OPERATIONAL_BOUNDARY_LATLNG = [
+  [18.580, 73.800], [18.590, 73.870], [18.575, 73.930],
+  [18.540, 73.950], [18.490, 73.940], [18.455, 73.900],
+  [18.450, 73.820], [18.470, 73.780], [18.520, 73.775],
+  [18.560, 73.785],
+];
+const OPERATIONAL_BOUNDARY_XY = OPERATIONAL_BOUNDARY_LATLNG.map(([lat,lng]) => ll2xy(lat,lng));
+
+let operationalBoundaryLayer = null;
+let boundaryBreachLayers = {};
+
+function pointInPolygon(px, py, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+    const intersect = ((yi > py) !== (yj > py)) &&
+                      (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function clampToBoundary(x, y, margin = 0.015) {
+  const poly = OPERATIONAL_BOUNDARY_XY;
+  let nearestDist = Infinity, nearestX = x, nearestY = y;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const ax = poly[j].x, ay = poly[j].y;
+    const bx = poly[i].x, by = poly[i].y;
+    const dx = bx - ax, dy = by - ay;
+    const lenSq = dx*dx + dy*dy;
+    let t = ((x - ax)*dx + (y - ay)*dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const cx = ax + t*dx, cy = ay + t*dy;
+    const dist = Math.sqrt((x-cx)**2 + (y-cy)**2);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      const centX = poly.reduce((s,p)=>s+p.x,0)/poly.length;
+      const centY = poly.reduce((s,p)=>s+p.y,0)/poly.length;
+      const nx = centX - cx, ny = centY - cy;
+      const nl = Math.sqrt(nx*nx+ny*ny);
+      nearestX = cx + (nx/nl)*margin;
+      nearestY = cy + (ny/nl)*margin;
+    }
+  }
+  return { x: nearestX, y: nearestY };
+}
+
+function enforceBoundary(drone) {
+  const inside = pointInPolygon(drone.x, drone.y, OPERATIONAL_BOUNDARY_XY);
+  if (!inside) {
+    const safe = clampToBoundary(drone.x, drone.y);
+    drone.x = safe.x; drone.y = safe.y;
+    const centX = OPERATIONAL_BOUNDARY_XY.reduce((s,p)=>s+p.x,0)/OPERATIONAL_BOUNDARY_XY.length;
+    const centY = OPERATIONAL_BOUNDARY_XY.reduce((s,p)=>s+p.y,0)/OPERATIONAL_BOUNDARY_XY.length;
+    drone.targetX = centX + (Math.random()-0.5)*0.1;
+    drone.targetY = centY + (Math.random()-0.5)*0.1;
+    drone.bezierPath = null; drone.pathProgress = 0;
+    const now = Date.now();
+    if (!drone._lastBreachLog || now - drone._lastBreachLog > 4000) {
+      drone._lastBreachLog = now;
+      STATE.boundaryBreachCount++;
+      addLog(`⚠ BOUNDARY BREACH: ${drone.id} exceeded flight zone — forced redirect`, 'boundary');
+      playAlertSound(); flashBoundaryWarning();
+    }
+    if (!drone.boundaryBreach) { drone.boundaryBreach = true; updateBoundaryStatus(true); }
+    return false;
+  } else {
+    if (drone.boundaryBreach) {
+      drone.boundaryBreach = false;
+      if (!STATE.drones.some(d => d.boundaryBreach)) updateBoundaryStatus(false);
+    }
+    return true;
+  }
+}
+
+function flashBoundaryWarning() {
+  const tag = document.getElementById('boundaryTag');
+  if (!tag) return;
+  tag.textContent = '⚠ BOUNDARY BREACH — DRONE REDIRECTED';
+  tag.classList.add('boundary-warn');
+  if (operationalBoundaryLayer) {
+    operationalBoundaryLayer.setStyle({ color:'#ff4444', fillColor:'#ff4444', fillOpacity:0.12 });
+    setTimeout(() => { if (operationalBoundaryLayer) operationalBoundaryLayer.setStyle({ color:'#a855f7', fillColor:'#a855f7', fillOpacity:0.04 }); }, 2500);
+  }
+  setTimeout(() => { tag.textContent = 'BOUNDARY: OPERATIONAL — ALL CLEAR'; tag.classList.remove('boundary-warn'); }, 4000);
+}
+
+function updateBoundaryStatus(breaching) {
+  const dot = document.getElementById('boundaryDot');
+  const label = document.getElementById('boundaryStatus');
+  if (breaching) {
+    dot.style.background = 'var(--accent-danger)'; dot.style.boxShadow = '0 0 6px var(--accent-danger)';
+    label.textContent = 'BOUNDARY: BREACH'; label.style.color = 'var(--accent-danger)';
+  } else {
+    dot.style.background = 'var(--accent-ok)'; dot.style.boxShadow = 'none';
+    label.textContent = 'BOUNDARY: SECURE'; label.style.color = '';
+  }
+}
+
+function initOperationalBoundary() {
+  if (!leafletMap) return;
+  if (operationalBoundaryLayer) leafletMap.removeLayer(operationalBoundaryLayer);
+  operationalBoundaryLayer = L.polygon(OPERATIONAL_BOUNDARY_LATLNG, {
+    color:'#a855f7', fillColor:'#a855f7', fillOpacity:0.04, weight:2, opacity:0.6, dashArray:'8 6',
+  }).addTo(leafletMap);
+  operationalBoundaryLayer.bindTooltip('⬡ OPERATIONAL BOUNDARY — AUTHORISED FLIGHT ZONE', { className:'geo-tooltip', sticky:true });
+  addLog('BOUNDARY: Operational flight boundary loaded — PUNE CENTRAL SECTOR', 'boundary');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  FEATURE 2: BEZIER CURVE PATH NAVIGATION
+// ═══════════════════════════════════════════════════════════════════════════
+function computeBezierControlPoints(x0,y0,x1,y1,curvature=0.25) {
+  const dx=x1-x0,dy=y1-y0,len=Math.sqrt(dx*dx+dy*dy);
+  if(len<0.001) return {cp1x:x0,cp1y:y0,cp2x:x1,cp2y:y1};
+  const perpX=-dy/len,perpY=dx/len;
+  const side=Math.random()>.5?1:-1;
+  const offset=len*curvature*side;
+  const midX=(x0+x1)/2+perpX*offset,midY=(y0+y1)/2+perpY*offset;
+  return {cp1x:x0+(midX-x0)*.66,cp1y:y0+(midY-y0)*.66,cp2x:x1+(midX-x1)*.66,cp2y:y1+(midY-y1)*.66};
+}
+function evalBezier(t,x0,y0,cp1x,cp1y,cp2x,cp2y,x1,y1) {
+  const mt=1-t;
+  return {x:mt*mt*mt*x0+3*mt*mt*t*cp1x+3*mt*t*t*cp2x+t*t*t*x1,y:mt*mt*mt*y0+3*mt*mt*t*cp1y+3*mt*t*t*cp2y+t*t*t*y1};
+}
+function easeInOut(t) { return t<0.5?2*t*t:-1+(4-2*t)*t; }
+function buildDronePath(drone) {
+  if(!drone||drone.x===undefined) return;
+  const cp=computeBezierControlPoints(drone.x,drone.y,drone.targetX,drone.targetY,0.18+Math.random()*.15);
+  drone.bezierPath={x0:drone.x,y0:drone.y,cp1x:cp.cp1x,cp1y:cp.cp1y,cp2x:cp.cp2x,cp2y:cp.cp2y,x1:drone.targetX,y1:drone.targetY};
+  drone.pathProgress=0;
+  drone.pathLength=Math.sqrt((drone.targetX-drone.x)**2+(drone.targetY-drone.y)**2);
+}
+function advanceDroneOnPath(drone,dt) {
+  if(!drone.bezierPath) return true;
+  const bp=drone.bezierPath;
+  drone.pathProgress=Math.min(1,drone.pathProgress+drone.speed*0.5);
+  const easedT=easeInOut(drone.pathProgress);
+  const pos=evalBezier(easedT,bp.x0,bp.y0,bp.cp1x,bp.cp1y,bp.cp2x,bp.cp2y,bp.x1,bp.y1);
+  const drift=0.001;
+  drone.x=pos.x+Math.sin(Date.now()*.002+drone.id.charCodeAt(0))*drift;
+  drone.y=pos.y+Math.cos(Date.now()*.003+drone.id.charCodeAt(1))*drift;
+  if(drone.pathProgress>0&&drone.pathProgress<0.98) {
+    const tNext=Math.min(1,drone.pathProgress+0.02);
+    const posNext=evalBezier(tNext,bp.x0,bp.y0,bp.cp1x,bp.cp1y,bp.cp2x,bp.cp2y,bp.x1,bp.y1);
+    const targetHeading=Math.atan2(posNext.y-pos.y,posNext.x-pos.x);
+    if(drone.heading===undefined) drone.heading=targetHeading;
+    let dh=targetHeading-drone.heading;
+    while(dh>Math.PI) dh-=2*Math.PI;
+    while(dh<-Math.PI) dh+=2*Math.PI;
+    drone.heading+=dh*.12;
+  }
+  return drone.pathProgress>=1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  FEATURE 3: OBSTACLE AVOIDANCE
+// ═══════════════════════════════════════════════════════════════════════════
+const OBSTACLES = [
+  {x:.32,y:.28,w:.06,h:.08,label:'Shivajinagar Complex'},
+  {x:.55,y:.18,w:.07,h:.06,label:'Pune IT Park'},
+  {x:.70,y:.35,w:.05,h:.07,label:'Koregaon Towers'},
+  {x:.18,y:.45,w:.06,h:.05,label:'Deccan Galleria'},
+  {x:.60,y:.55,w:.08,h:.06,label:'Viman Nagar Mall'},
+  {x:.25,y:.62,w:.05,h:.07,label:'Swargate Junction'},
+  {x:.45,y:.70,w:.07,h:.05,label:'Hadapsar Industrial'},
+  {x:.75,y:.65,w:.06,h:.06,label:'Mundhwa Complex'},
+];
+const OBSTACLE_MARGIN=0.025;
+let obstacleLeafletLayers=[];
+let avoidancePathLayers={};
+
+function initObstaclesOnMap() {
+  if(!leafletMap) return;
+  obstacleLeafletLayers.forEach(l=>leafletMap.removeLayer(l));
+  obstacleLeafletLayers=[];
+  OBSTACLES.forEach(obs=>{
+    const corners=[xy2ll(obs.x,obs.y),xy2ll(obs.x+obs.w,obs.y),xy2ll(obs.x+obs.w,obs.y+obs.h),xy2ll(obs.x,obs.y+obs.h)];
+    const poly=L.polygon(corners,{color:'#475569',fillColor:'#1e293b',fillOpacity:.55,weight:1.5,opacity:.8}).addTo(leafletMap);
+    poly.bindTooltip(`🏢 ${obs.label}`,{className:'drone-ltooltip',sticky:false});
+    obstacleLeafletLayers.push(poly);
+  });
+  addLog(`OBSTACLE: ${OBSTACLES.length} urban structures mapped — avoidance ACTIVE`,'avoidance');
+}
+
+function lineIntersectsObstacle(x0,y0,x1,y1) {
+  for(const obs of OBSTACLES) {
+    const ex=obs.x-OBSTACLE_MARGIN,ey=obs.y-OBSTACLE_MARGIN,ew=obs.w+OBSTACLE_MARGIN*2,eh=obs.h+OBSTACLE_MARGIN*2;
+    const insideA=x0>=ex&&x0<=ex+ew&&y0>=ey&&y0<=ey+eh;
+    const insideB=x1>=ex&&x1<=ex+ew&&y1>=ey&&y1<=ey+eh;
+    if(insideA||insideB) return obs;
+    if(segmentIntersectsAABB(x0,y0,x1,y1,ex,ey,ex+ew,ey+eh)) return obs;
+  }
+  return null;
+}
+function segmentIntersectsAABB(x0,y0,x1,y1,minX,minY,maxX,maxY) {
+  const dx=x1-x0,dy=y1-y0;
+  let tMin=0,tMax=1;
+  const checks=[{p:-dx,q:x0-minX},{p:dx,q:maxX-x0},{p:-dy,q:y0-minY},{p:dy,q:maxY-y0}];
+  for(const{p,q}of checks){if(p===0){if(q<0)return false;continue;}const t=q/p;if(p<0)tMin=Math.max(tMin,t);else tMax=Math.min(tMax,t);if(tMin>tMax)return false;}
+  return true;
+}
+function computeAvoidanceWaypoint(sx,sy,tx,ty,obs) {
+  const ocx=obs.x+obs.w/2,ocy=obs.y+obs.h/2;
+  const toObsX=ocx-sx,toObsY=ocy-sy;
+  const dx=tx-sx,dy=ty-sy,len=Math.sqrt(dx*dx+dy*dy);
+  const dirX=dx/len,dirY=dy/len;
+  const perpX=-dirY,perpY=dirX;
+  const dotPerp=toObsX*perpX+toObsY*perpY;
+  const side=dotPerp>0?-1:1;
+  const halfDiag=Math.sqrt((obs.w/2)**2+(obs.h/2)**2);
+  const clearance=halfDiag+OBSTACLE_MARGIN+0.04;
+  const projDist=toObsX*dirX+toObsY*dirY;
+  return{wpX:sx+dirX*projDist+perpX*clearance*side,wpY:sy+dirY*projDist+perpY*clearance*side};
+}
+function checkAndRerouteAroundObstacles(drone) {
+  if(!drone.bezierPath) return;
+  const SAMPLES=12,bp=drone.bezierPath;
+  for(let i=0;i<SAMPLES;i++) {
+    const t0=i/SAMPLES,t1=(i+1)/SAMPLES;
+    const p0=evalBezier(t0,bp.x0,bp.y0,bp.cp1x,bp.cp1y,bp.cp2x,bp.cp2y,bp.x1,bp.y1);
+    const p1=evalBezier(t1,bp.x0,bp.y0,bp.cp1x,bp.cp1y,bp.cp2x,bp.cp2y,bp.x1,bp.y1);
+    const obstacle=lineIntersectsObstacle(p0.x,p0.y,p1.x,p1.y);
+    if(obstacle) {
+      const{wpX,wpY}=computeAvoidanceWaypoint(drone.x,drone.y,drone.targetX,drone.targetY,obstacle);
+      if(!drone.waypointQueue) drone.waypointQueue=[];
+      drone.waypointQueue.unshift({x:drone.targetX,y:drone.targetY});
+      drone.targetX=wpX;drone.targetY=wpY;
+      buildDronePath(drone);
+      drone.status='avoiding';drone.avoidingObstacle=obstacle.label;
+      drawAvoidancePath(drone,wpX,wpY,drone.waypointQueue[0].x,drone.waypointQueue[0].y);
+      addLog(`AVOIDANCE: ${drone.id} rerouting around [${obstacle.label}]`,'avoidance');
+      break;
+    }
+  }
+}
+function drawAvoidancePath(drone,wpX,wpY,finalX,finalY) {
+  if(!leafletMap) return;
+  if(avoidancePathLayers[drone.id]) leafletMap.removeLayer(avoidancePathLayers[drone.id]);
+  avoidancePathLayers[drone.id]=L.polyline([xy2ll(drone.x,drone.y),xy2ll(wpX,wpY),xy2ll(finalX,finalY)],{color:'#fb923c',weight:2,opacity:.7,dashArray:'6 4'}).addTo(leafletMap);
+  setTimeout(()=>{if(avoidancePathLayers[drone.id]){leafletMap.removeLayer(avoidancePathLayers[drone.id]);delete avoidancePathLayers[drone.id];}},8000);
+}
+function clearAvoidancePath(drone) {
+  if(avoidancePathLayers[drone.id]) {if(leafletMap) leafletMap.removeLayer(avoidancePathLayers[drone.id]);delete avoidancePathLayers[drone.id];}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ★ NEW FEATURE 1: MAP VIEW MODE SWITCHER
+//  Supports: dark (default), satellite, terrain
+//  Each mode swaps the Leaflet tile layer and adjusts CSS filter on tiles.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * MAP_TILE_LAYERS: Tile URL definitions for each map mode.
+ * - dark:      CartoDB dark (existing default)
+ * - satellite: ESRI World Imagery
+ * - terrain:   Stadia Stamen Terrain
+ */
+const MAP_TILE_LAYERS = {
+  grey: {
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    subdomains: 'abcd',
+    label: 'GREY',
+  },
+  dark: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    subdomains: 'abcd',
+    label: 'DARK',
+  },
+  satellite: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    subdomains: '',
+    label: 'SATELLITE',
+  },
+  terrain: {
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    subdomains: '',
+    label: 'TERRAIN',
+  },
+};
+
+let currentTileLayer = null; // track the active Leaflet tile layer
+
+/**
+ * setMapMode: Switch the map tile layer and apply the appropriate CSS class
+ * on the map panel for filter adjustments.
+ * @param {'dark'|'satellite'|'terrain'} mode
+ */
+function setMapMode(mode) {
+  if (!leafletMap) return;
+  if (STATE.mapMode === mode) return; // no-op if already active
+
+  STATE.mapMode = mode;
+
+  // Remove old tile layer
+  if (currentTileLayer) {
+    leafletMap.removeLayer(currentTileLayer);
+    currentTileLayer = null;
+  }
+
+  // Add new tile layer
+  const layerDef = MAP_TILE_LAYERS[mode];
+  const opts = { maxZoom: 19 };
+  if (layerDef.subdomains) opts.subdomains = layerDef.subdomains;
+  currentTileLayer = L.tileLayer(layerDef.url, opts);
+  // Insert at bottom so overlays remain on top
+  currentTileLayer.addTo(leafletMap);
+  currentTileLayer.bringToBack();
+
+  // Update CSS class on map panel for filter adjustments
+  const mapPanel = document.getElementById('mapPanel');
+  mapPanel.classList.remove('grey-mode', 'dark-mode', 'satellite-mode', 'terrain-mode');
+  mapPanel.classList.add(`${mode}-mode`);
+
+  // Update button states
+  ['grey', 'dark', 'satellite', 'terrain'].forEach(m => {
+    const btn = document.getElementById(`mode${m.charAt(0).toUpperCase() + m.slice(1)}`);
+    if (btn) btn.classList.toggle('active', m === mode);
+  });
+
+  // Update map overlay tag
+  const mapZone = document.getElementById('mapZone');
+  const modeLabels = { grey: 'ZONE: CENTRAL GRID — GREY', dark: 'ZONE: CENTRAL GRID — DARK', satellite: 'ZONE: CENTRAL GRID — SATELLITE', terrain: 'ZONE: CENTRAL GRID — TERRAIN' };
+  if (mapZone) mapZone.textContent = modeLabels[mode];
+
+  addLog(`MAP: View mode switched to [${layerDef.label}]`, 'ok');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ROSBRIDGE WEBSOCKET
+// ═══════════════════════════════════════════════════════════════════════════
+function initROSBridge() {
+  if (STATE.rosConnected) return;
+  try {
+    const ws = new WebSocket('ws://localhost:9090');
+    STATE.rosWs = ws;
+    ws.onopen = () => {
+      STATE.rosConnected = true; updateROSStatus(true);
+      addLog('ROS: ROSBridge connected ws://localhost:9090','ros');
+      const topics=[
+        {op:'subscribe',topic:'/mavros/state',type:'mavros_msgs/State'},
+        {op:'subscribe',topic:'/mavros/local_position/pose',type:'geometry_msgs/PoseStamped'},
+        {op:'subscribe',topic:'/yolov8/detections',type:'vision_msgs/Detection2DArray'},
+        {op:'subscribe',topic:'/camera/image_raw',type:'sensor_msgs/Image'},
+      ];
+      topics.forEach(t=>ws.send(JSON.stringify(t)));
+    };
+    ws.onmessage=(evt)=>{try{handleROSMessage(JSON.parse(evt.data));}catch(e){}};
+    ws.onerror=()=>fallbackSimMode();
+    ws.onclose=()=>{STATE.rosConnected=false;fallbackSimMode();};
+    setTimeout(()=>{if(!STATE.rosConnected)fallbackSimMode();},2500);
+  } catch(e){fallbackSimMode();}
+}
+
+function handleROSMessage(msg) {
+  if(!msg.topic) return;
+  if(msg.topic==='/mavros/state') {
+    const d=msg.msg;
+    document.getElementById('mavArmed').textContent=d.armed?'YES':'NO';
+    document.getElementById('mavMode').textContent=d.mode||'—';
+    document.getElementById('px4ModeBadge').textContent='MODE: '+(d.mode||'OFFBOARD');
+  }
+  if(msg.topic==='/mavros/local_position/pose') {
+    const p=msg.msg.pose.position;
+    document.getElementById('mavAlt').textContent=p.z.toFixed(1)+'m';
+    // ★ MODIFIED: also update simLatLng with formatted coords
+    const lat=(18.5204+p.y*0.0001).toFixed(4), lng=(73.8567+p.x*0.0001).toFixed(4);
+    document.getElementById('simLatLng').textContent=`${lat}°N, ${lng}°E`;
+  }
+  if(msg.topic==='/yolov8/detections') {
+    const dets=msg.msg.detections||[];
+    STATE.yoloDetections=dets.map(d=>({cls:d.results[0]?.hypothesis?.class_id||'unknown',conf:d.results[0]?.hypothesis?.score||0,bbox:d.bbox}));
+    renderYOLOList();
+  }
+}
+
+function updateROSStatus(connected) {
+  const dot=document.getElementById('rosConnDot'),label=document.getElementById('rosConnLabel'),hdot=document.getElementById('rosDot'),hstatus=document.getElementById('rosStatus');
+  if(connected){dot.className='ros-dot connected';label.textContent='ROSBridge WebSocket — ws://localhost:9090 — CONNECTED';label.style.color='var(--accent-ok)';hdot.style.background='var(--accent-ok)';hstatus.textContent='ROS: CONNECTED';document.getElementById('rosFeedStatus').textContent='● LIVE';document.getElementById('rosFeedStatus').style.color='var(--accent-ok)';}
+}
+function fallbackSimMode() {
+  const dot=document.getElementById('rosConnDot'),label=document.getElementById('rosConnLabel');
+  dot.className='ros-dot waiting';label.textContent='ROSBridge WebSocket — ws://localhost:9090 — SIMULATION MODE (start rosbridge_server to connect)';label.style.color='var(--accent-warn)';
+  document.getElementById('rosDot').style.background='var(--accent-warn)';document.getElementById('rosStatus').textContent='ROS: SIM';
+  addLog('ROS: No ROSBridge server found — running in simulation mode','warn');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  GEOFENCE EXCLUSION ZONES
+// ═══════════════════════════════════════════════════════════════════════════
+const GEOFENCE_ZONES=[
+  {id:'GF-01',name:'Airport Perimeter',lat:18.582,lng:73.918,radius:1200,color:'#f97316',active:true,type:'exclusion'},
+  {id:'GF-02',name:'Hospital Zone',lat:18.519,lng:73.855,radius:400,color:'#ef4444',active:true,type:'exclusion'},
+  {id:'GF-03',name:'Gov Complex',lat:18.528,lng:73.847,radius:600,color:'#f97316',active:true,type:'exclusion'},
+  {id:'GF-04',name:'Ops Corridor A',lat:18.500,lng:73.870,radius:800,color:'#22c55e',active:true,type:'allowed'},
+];
+let geoFenceLayers=[];
+function initGeofenceZones() {
+  if(!leafletMap) return;
+  geoFenceLayers.forEach(l=>leafletMap.removeLayer(l));geoFenceLayers=[];
+  GEOFENCE_ZONES.forEach(z=>{
+    const col=z.type==='exclusion'?z.color:'#22c55e';
+    const c=L.circle([z.lat,z.lng],{radius:z.radius,color:col,fillColor:col,fillOpacity:.07,weight:1.5,opacity:.5,dashArray:z.type==='exclusion'?'6 5':null}).addTo(leafletMap);
+    c.bindTooltip(`${z.id}: ${z.name} [${z.type.toUpperCase()}]`,{className:'geo-tooltip',permanent:false});
+    geoFenceLayers.push(c);
+  });
+  renderGeoZonesList();
+}
+function renderGeoZonesList() {
+  const list=document.getElementById('geoZonesList');if(!list)return;
+  list.innerHTML=GEOFENCE_ZONES.map(z=>`<div class="geo-item"><div class="geo-dot" style="background:${z.type==='exclusion'?z.color:'#22c55e'}"></div><span class="geo-name">${z.name}</span><span class="geo-status" style="color:${z.type==='exclusion'?'var(--accent-danger)':'var(--accent-ok)'}; border:1px solid; border-color:${z.type==='exclusion'?'rgba(255,68,68,.25)':'rgba(34,197,94,.25)'}; padding:1px 5px;">${z.type.toUpperCase()}</span></div>`).join('');
+}
+function checkGeofenceBreach(lat,lng) {
+  for(const z of GEOFENCE_ZONES){if(z.type!=='exclusion'||!z.active)continue;const dlat=lat-z.lat,dlng=lng-z.lng;const dist=Math.sqrt(dlat*dlat*111320*111320+dlng*dlng*Math.pow(111320*Math.cos(lat*Math.PI/180),2));if(dist<z.radius)return z;}
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  LEAFLET MAP
+// ═══════════════════════════════════════════════════════════════════════════
+let leafletMap=null,droneMarkers={},droneTrailLines={},incidentMarkers={},heatLayer=null;
+let cctvMarkers=[];
+
+function initLeafletMap() {
+  leafletMap=L.map('leafletMap',{center:[18.52,73.855],zoom:13,zoomControl:false,attributionControl:false,preferCanvas:true});
+
+  // ★ MODIFIED: Store tile layer ref so setMapMode can swap it
+  currentTileLayer = L.tileLayer(MAP_TILE_LAYERS.grey.url,{maxZoom:19,subdomains:'abcd'}).addTo(leafletMap);
+
+  heatLayer=L.heatLayer([],{radius:45,blur:35,maxZoom:15,max:1.0,gradient:{0.3:'#001f4d',0.5:'#f59e0b',0.75:'#f97316',1.0:'#ff0000'}}).addTo(leafletMap);
+
+  FEED_LOCATIONS.forEach(loc=>{L.circle([loc.lat,loc.lng],{radius:800,color:'#38bdf8',fillColor:'#38bdf8',fillOpacity:.03,weight:1,opacity:.3,dashArray:'4 5'}).addTo(leafletMap);});
+  FEED_LOCATIONS.forEach((loc,i)=>{
+    const icon=L.divIcon({className:'',iconSize:[16,16],iconAnchor:[8,8],html:`<div style="width:16px;height:16px;background:rgba(56,189,248,.15);border:1.5px solid #38bdf8;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:9px;">📷</div>`});
+    const m=L.marker([loc.lat,loc.lng],{icon,zIndexOffset:600}).addTo(leafletMap);
+    m.bindTooltip(`CAM-${i+1}: ${loc.name}`,{className:'drone-ltooltip',permanent:false});
+    cctvMarkers.push(m);
+  });
+  BASE_POSITIONS.forEach(pos=>{const ll=xy2ll(pos.x,pos.y);L.circleMarker(ll,{radius:4,color:'#555',fillColor:'#333',fillOpacity:.5,weight:1,opacity:.5}).addTo(leafletMap);});
+  initGeofenceZones();
+  initOperationalBoundary();
+  initObstaclesOnMap();
+
+  leafletMap.on('moveend',()=>{const c=leafletMap.getCenter();document.getElementById('coordsDisplay').textContent=`LAT: ${c.lat.toFixed(4)}° N | LNG: ${c.lng.toFixed(4)}° E | ALT: 580m`;});
+}
+
+function getDroneColor(status) {
+  if(status==='avoiding') return '#fb923c';
+  return status==='standby'?'#22c55e':status==='dispatched'?'#818cf8':status==='returning'?'#f59e0b':'#555';
+}
+
+function createDroneIcon(drone) {
+  const col=getDroneColor(drone.status);
+  const isActive=drone.status==='dispatched'||drone.status==='returning'||drone.status==='avoiding';
+  const spinClass=isActive?'drone-svg-spin':'';
+  const ringHtml=isActive?`<div class="drone-icon-ring" style="width:20px;height:20px;border-color:${col};top:-4px;left:-4px;"></div>`:'';
+  const headingDeg=drone.heading!==undefined?(drone.heading*180/Math.PI):0;
+  return L.divIcon({
+    className:'',
+    html:`<div class="drone-icon-outer" style="width:20px;height:20px;transform:rotate(${headingDeg}deg)">${ringHtml}<svg class="${spinClass}" width="20" height="20" viewBox="-10 -10 20 20" style="filter:drop-shadow(0 0 4px ${col})"><line x1="-7" y1="-3" x2="7" y2="-3" stroke="${col}" stroke-width="1.5"/><line x1="-7" y1="3" x2="7" y2="3" stroke="${col}" stroke-width="1.5"/><line x1="-3" y1="-7" x2="-3" y2="7" stroke="${col}" stroke-width="1.5"/><line x1="3" y1="-7" x2="3" y2="7" stroke="${col}" stroke-width="1.5"/><circle cx="-7" cy="-3" r="1.8" fill="${col}"/><circle cx="7" cy="-3" r="1.8" fill="${col}"/><circle cx="-7" cy="3" r="1.8" fill="${col}"/><circle cx="7" cy="3" r="1.8" fill="${col}"/><rect x="-2.5" y="-2.5" width="5" height="5" fill="${col}" opacity=".9"/></svg></div>`,
+    iconSize:[20,20],iconAnchor:[10,10],
+  });
+}
+
+function createIncidentIcon(inc) {
+  const col=inc.severity==='critical'?'#ff4444':inc.severity==='high'?'#f59e0b':'#38bdf8';
+  return L.divIcon({
+    className:'',
+    html:`<div class="inc-marker-dot" style="background:${col}22;border:2px solid ${col};box-shadow:0 0 8px ${col}88;width:22px;height:22px;">${inc.icon}</div>`,
+    iconSize:[22,22],iconAnchor:[11,11],
+  });
+}
+
+function updateLeafletDrones() {
+  if(!leafletMap) return;
+  for(const d of STATE.drones) {
+    const ll=xy2ll(d.x,d.y);
+    if(!droneMarkers[d.id]) {
+      // ★ MODIFIED: Drone tooltip now shows live coordinates
+      const m=L.marker(ll,{icon:createDroneIcon(d),zIndexOffset:800}).addTo(leafletMap);
+      const c=xyToCoordStr(d.x,d.y);
+      m.bindTooltip(`${d.id} | ${c.short}`,{permanent:true,direction:'right',className:'drone-ltooltip',offset:[8,0]});
+      droneMarkers[d.id]=m;
+    } else {
+      droneMarkers[d.id].setLatLng(ll);
+      droneMarkers[d.id].setIcon(createDroneIcon(d));
+      // ★ NEW: Update tooltip content with live coordinates
+      const c=xyToCoordStr(d.x,d.y);
+      droneMarkers[d.id].setTooltipContent(`${d.id} | ${c.short}`);
+    }
+    if(d.trail.length>1){
+      const coords=d.trail.map(p=>xy2ll(p.x,p.y));
+      if(!droneTrailLines[d.id]){droneTrailLines[d.id]=L.polyline(coords,{color:getDroneColor(d.status),weight:1.5,opacity:.4,dashArray:'3 5'}).addTo(leafletMap);}
+      else{droneTrailLines[d.id].setLatLngs(coords);droneTrailLines[d.id].setStyle({color:getDroneColor(d.status)});}
+    } else if(droneTrailLines[d.id]) droneTrailLines[d.id].setLatLngs([]);
+  }
+}
+
+function updateLeafletIncidents() {
+  if(!leafletMap) return;
+  const activeIds=new Set(STATE.incidents.filter(i=>i.status!=='resolved').map(i=>i.id));
+  for(const id of Object.keys(incidentMarkers)){if(!activeIds.has(parseInt(id))){leafletMap.removeLayer(incidentMarkers[id]);delete incidentMarkers[id];}}
+  for(const inc of STATE.incidents) {
+    if(inc.status==='resolved'||incidentMarkers[inc.id]) continue;
+    const ll=xy2ll(inc.x,inc.y);
+    const m=L.marker(ll,{icon:createIncidentIcon(inc),zIndexOffset:1000}).addTo(leafletMap);
+
+    // ★ MODIFIED: Incident popup now includes exact lat/lng coordinates
+    const incCoords=xyToCoordStr(inc.x,inc.y);
+    m.bindPopup(`<div style="font-family:'JetBrains Mono',monospace;font-size:9px;padding:8px;min-width:170px;">
+      <div style="color:#ff4444;font-size:10px;margin-bottom:5px;">${inc.icon} ${inc.type}</div>
+      <div style="color:#555;margin-bottom:2px;">📍 ${inc.location}</div>
+      <div style="color:#555;margin-bottom:4px;">${inc.desc}</div>
+      <div style="color:#f97316;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2);padding:3px 5px;margin-bottom:3px;font-family:'Space Mono',monospace;font-size:8px;">
+        ◈ LAT: ${incCoords.lat}°N<br>◈ LNG: ${incCoords.lng}°E
+      </div>
+      <div style="color:#f0f0f0;">CONF: ${(inc.confidence*100).toFixed(1)}% | SEV: ${inc.severity.toUpperCase()}</div>
+    </div>`);
+
+    const incLl=xy2ll(inc.x,inc.y);
+    const breach=checkGeofenceBreach(incLl[0],incLl[1]);
+    if(breach){
+      addLog(`GEOFENCE: Incident #${inc.id} near ${breach.name} — drone routing around zone`,'geo');
+      document.getElementById('geoStatus').textContent=`GEOFENCE: BREACH DETECTED — ${breach.id}`;
+      document.getElementById('geoStatus').style.color='var(--accent-danger)';
+      setTimeout(()=>{document.getElementById('geoStatus').textContent='GEOFENCE: 3 ZONES ACTIVE';document.getElementById('geoStatus').style.color='var(--accent-geo)';},6000);
+    }
+    incidentMarkers[inc.id]=m;
+    STATE.heatPoints.push([ll[0],ll[1],inc.severity==='critical'?1.0:inc.severity==='high'?0.7:0.4]);
+    if(STATE.heatPoints.length>60) STATE.heatPoints.shift();
+    if(heatLayer) heatLayer.setLatLngs(STATE.heatPoints);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  AUDIO
+// ═══════════════════════════════════════════════════════════════════════════
+let audioCtx=null;
+function getAudioCtx(){if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx;}
+function playAlertSound(){try{const ctx=getAudioCtx();[[880,0],[660,.18],[880,.32]].forEach(([freq,when])=>{const osc=ctx.createOscillator(),gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=freq;osc.type='square';gain.gain.setValueAtTime(0,ctx.currentTime+when);gain.gain.linearRampToValueAtTime(.07,ctx.currentTime+when+.01);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+when+.14);osc.start(ctx.currentTime+when);osc.stop(ctx.currentTime+when+.14);});}catch(e){}}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  WEBCAM + COCO-SSD
+// ═══════════════════════════════════════════════════════════════════════════
+let cocoModel=null,lastWebcamIncidentTime=0;
+const WEBCAM_COOLDOWN=18000;
+
+async function initWebcam() {
+  try {
+    const stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640},height:{ideal:480},facingMode:'environment'}});
+    const video=document.getElementById('webcamVideo');
+    video.srcObject=stream;video.style.display='block';
+    document.getElementById('feedSlot0').classList.add('webcam-active');
+    STATE.webcamActive=true;
+    addLog('CCTV: Feed CAM-1 connected — webcam LIVE','ok');
+    document.getElementById('feedStatus0').textContent='● WEBCAM';document.getElementById('feedStatus0').style.color='var(--accent-drone)';
+    const badge=document.createElement('div');badge.className='ai-live-badge';badge.id='aiLiveBadge';badge.textContent='YOLOv8 LIVE';
+    document.getElementById('feedSlot0').appendChild(badge);
+    addLog('YOLO: Initializing model (YOLOv8 via COCO-SSD)...','yolo');
+    try{await tf.ready();cocoModel=await cocoSsd.load({base:'lite_mobilenet_v2'});addLog('YOLO: Model loaded — person/object detection ACTIVE','yolo');document.getElementById('aiDot').style.background='var(--accent-yolo)';document.getElementById('aiStatus').textContent='YOLO: ACTIVE';runDetection();}
+    catch(e){addLog('YOLO: Model load failed — feed active, detection disabled','warn');document.getElementById('aiStatus').textContent='YOLO: ERROR';}
+  } catch(err){addLog('CCTV: Webcam denied — simulated CCTV feed active','warn');document.getElementById('aiStatus').textContent='YOLO: SIM';document.getElementById('aiDot').style.background='var(--accent-warn)';}
+}
+
+async function runDetection() {
+  const video=document.getElementById('webcamVideo');
+  if(!cocoModel||!video||video.readyState<2){setTimeout(runDetection,300);return;}
+  try{const preds=await cocoModel.detect(video);STATE.webcamPredictions=preds;const now=Date.now();const persons=preds.filter(p=>p.class==='person'&&p.score>.62);if(persons.length>0&&now-lastWebcamIncidentTime>WEBCAM_COOLDOWN){lastWebcamIncidentTime=now;triggerWebcamIncident(persons[0]);}}
+  catch(e){STATE.webcamPredictions=[];}
+  setTimeout(runDetection,220);
+}
+
+function triggerWebcamIncident(prediction) {
+  const types=[{type:'PERSON DETECTED',severity:'medium',icon:'👤',desc:'Individual flagged by YOLOv8'},{type:'CROWD GATHERING',severity:'high',icon:'👥',desc:'Elevated crowd density'},{type:'SUSPICIOUS ACTIVITY',severity:'high',icon:'⚠',desc:'Unusual movement pattern'},{type:'PERIMETER BREACH',severity:'critical',icon:'🚷',desc:'Unauthorized zone entry'}];
+  const template=types[Math.floor(Math.random()*types.length)];
+  const fcRoad=FEED_LOCATIONS[0];
+  const jLat=(Math.random()-.5)*.001,jLng=(Math.random()-.5)*.001;
+  const pos=ll2xy(fcRoad.lat+jLat,fcRoad.lng+jLng);
+  const incident={id:STATE.incidentIdCounter++,...template,location:fcRoad.name,x:pos.x,y:pos.y,timestamp:new Date().toLocaleTimeString(),droneId:null,eta:null,status:'unassigned',cam:0,confidence:prediction.score,age:0,arrivalHandled:false};
+  STATE.incidents.push(incident);STATE.feeds[0].alerting=true;setTimeout(()=>{if(STATE.feeds[0])STATE.feeds[0].alerting=false;},3500);
+  const coords=xyToCoordStr(pos.x,pos.y);
+  addLog(`YOLO LIVE: ${template.type} @ ${fcRoad.name.toUpperCase()} [${coords.short}]`,'yolo');
+  playAlertSound();
+  const drone=findNearestDrone(incident.x,incident.y);
+  if(drone) dispatchDrone(drone,incident);else{addLog(`WARNING: No drones available — INCIDENT #${incident.id} queued`,'warn');incident.status='pending';}
+  renderIncidents();renderDrones();updateLeafletIncidents();
+}
+
+function renderWebcamOverlay(canvas,dt){
+  const slot=canvas.parentElement,W=slot.clientWidth,H=slot.clientHeight;
+  canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext('2d');ctx.clearRect(0,0,W,H);
+  const video=document.getElementById('webcamVideo');
+  const scaleX=video.videoWidth?W/video.videoWidth:1,scaleY=video.videoHeight?H/video.videoHeight:1;
+  for(const pred of STATE.webcamPredictions){
+    const[bx,by,bw,bh]=pred.bbox;const x=bx*scaleX,y=by*scaleY,w=bw*scaleX,h=bh*scaleY,conf=pred.score;
+    const label=pred.class.toUpperCase(),isPerson=pred.class==='person',col=isPerson?'#ff4444':'#a3e635';
+    ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.strokeRect(x,y,w,h);
+    const cs=8;ctx.lineWidth=2.5;ctx.strokeStyle=isPerson?'#ff6666':'#a3e635';ctx.beginPath();ctx.moveTo(x,y+cs);ctx.lineTo(x,y);ctx.lineTo(x+cs,y);ctx.moveTo(x+w-cs,y);ctx.lineTo(x+w,y);ctx.lineTo(x+w,y+cs);ctx.moveTo(x+w,y+h-cs);ctx.lineTo(x+w,y+h);ctx.lineTo(x+w,y+h-cs);ctx.moveTo(x+cs,y+h);ctx.lineTo(x,y+h);ctx.lineTo(x,y+h-cs);ctx.stroke();
+    const lw=label.length*5+38;ctx.fillStyle='rgba(0,0,0,.82)';ctx.fillRect(x,y-14,lw,14);ctx.fillStyle=col;ctx.font='8px JetBrains Mono, monospace';ctx.fillText(`${label} ${(conf*100).toFixed(0)}%`,x+3,y-3);
+    ctx.fillStyle=isPerson?'rgba(255,68,68,.2)':'rgba(163,230,53,.2)';ctx.fillRect(x,y+h+1,w,2);ctx.fillStyle=col;ctx.fillRect(x,y+h+1,w*conf,2);
+  }
+  const scanY=((Date.now()*.04)%H)|0;ctx.fillStyle='rgba(255,255,255,.018)';ctx.fillRect(0,scanY,W,2);
+  ctx.fillStyle='rgba(0,0,0,.5)';ctx.fillRect(2,2,125,14);ctx.fillStyle='rgba(163,230,53,.75)';ctx.font='8px JetBrains Mono, monospace';ctx.fillText(new Date().toLocaleTimeString('en-GB',{hour12:false}),4,12);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DRONES
+// ═══════════════════════════════════════════════════════════════════════════
+const DRONE_NAMES=['KITE-01','KITE-02','HAWK-03','HAWK-04','RAVEN-05','RAVEN-06'];
+const DRONE_MODELS=['DJI M30T','DJI M30T','Parrot Anafi','Parrot Anafi','SkyScout X','SkyScout X'];
+const BASE_POSITIONS=[{x:.15,y:.2},{x:.5,y:.1},{x:.85,y:.2},{x:.15,y:.8},{x:.5,y:.85},{x:.85,y:.75}];
+
+function initDrones() {
+  STATE.drones=DRONE_NAMES.map((name,i)=>({
+    id:name,model:DRONE_MODELS[i],status:'standby',battery:75+Math.random()*25,
+    x:BASE_POSITIONS[i].x,y:BASE_POSITIONS[i].y,bx:BASE_POSITIONS[i].x,by:BASE_POSITIONS[i].y,
+    targetX:BASE_POSITIONS[i].x,targetY:BASE_POSITIONS[i].y,speed:.0025+Math.random()*.001,
+    altitude:80+Math.random()*40,assignedIncident:null,eta:null,trail:[],heading:0,
+    bezierPath:null,pathProgress:0,pathLength:0,waypointQueue:[],boundaryBreach:false,avoidingObstacle:null,
+  }));
+}
+
+function droneSVG(col,spinning){
+  return`<svg width="24" height="24" viewBox="-12 -12 24 24" style="filter:drop-shadow(0 0 3px ${col})"><g class="${spinning?'drone-body':''}"><line x1="-8" y1="-3" x2="8" y2="-3" stroke="${col}" stroke-width="1.8"/><line x1="-8" y1="3" x2="8" y2="3" stroke="${col}" stroke-width="1.8"/><line x1="-3" y1="-8" x2="-3" y2="8" stroke="${col}" stroke-width="1.8"/><line x1="3" y1="-8" x2="3" y2="8" stroke="${col}" stroke-width="1.8"/><circle cx="-8" cy="-3" r="2.2" fill="${col}"/><circle cx="8" cy="-3" r="2.2" fill="${col}"/><circle cx="-8" cy="3" r="2.2" fill="${col}"/><circle cx="8" cy="3" r="2.2" fill="${col}"/><rect x="-3" y="-3" width="6" height="6" fill="${col}" opacity=".85"/></g></svg>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INCIDENTS
+// ═══════════════════════════════════════════════════════════════════════════
+const INCIDENT_TYPES=[
+  {type:'FIRE DETECTED',severity:'critical',icon:'🔥',desc:'Smoke/flame detected'},
+  {type:'CROWD STAMPEDE',severity:'critical',icon:'👥',desc:'Abnormal crowd density'},
+  {type:'VEHICLE ACCIDENT',severity:'high',icon:'🚗',desc:'Collision detected'},
+  {type:'ARMED THREAT',severity:'critical',icon:'⚠',desc:'Weapon signature'},
+  {type:'STRUCTURAL COLLAPSE',severity:'high',icon:'🏗',desc:'Motion anomaly'},
+  {type:'MEDICAL EMERGENCY',severity:'high',icon:'🚑',desc:'Person down detected'},
+  {type:'FLOOD RISK',severity:'medium',icon:'💧',desc:'Water level rise'},
+  {type:'TRESPASSING',severity:'medium',icon:'🚷',desc:'Perimeter breach'},
+];
+
+const FEED_LOCATIONS=[
+  {name:'FC Road Intersection',lat:18.5195,lng:73.8469},
+  {name:'Pune Station Plaza',lat:18.5284,lng:73.8742},
+  {name:'Koregaon Park Blvd',lat:18.5362,lng:73.8938},
+  {name:'Viman Nagar Hub',lat:18.5679,lng:73.9143},
+];
+
+function findNearestDrone(ix,iy){let best=null,bestDist=Infinity;for(const d of STATE.drones){if(d.status==='standby'){const dx=d.x-ix,dy=d.y-iy,dist=Math.sqrt(dx*dx+dy*dy);if(dist<bestDist){bestDist=dist;best=d;}}}return best;}
+
+function dispatchDrone(drone,incident) {
+  drone.status='dispatched';drone.assignedIncident=incident.id;
+  const incLl=xy2ll(incident.x,incident.y);
+  const breach=checkGeofenceBreach(incLl[0],incLl[1]);
+  let targetX=incident.x,targetY=incident.y;
+  if(breach){
+    const angle=Math.random()*Math.PI*2,rad=breach.radius/111320+0.008;
+    const offLat=Math.cos(angle)*rad,offLng=Math.sin(angle)*rad;
+    const safe=ll2xy(incLl[0]+offLat,incLl[1]+offLng);
+    targetX=safe.x;targetY=safe.y;
+    addLog(`GEOFENCE: ${drone.id} rerouted around ${breach.name}`,'geo');
+    const geo=document.getElementById('mavGeo');if(geo){geo.textContent='REROUTING';geo.style.color='var(--accent-warn)';}
+    setTimeout(()=>{const g=document.getElementById('mavGeo');if(g){g.textContent='CLEAR';g.style.color='var(--accent-ok)';}},5000);
+  }
+  drone.targetX=targetX;drone.targetY=targetY;drone.waypointQueue=[];
+  buildDronePath(drone);checkAndRerouteAroundObstacles(drone);
+  const dx=drone.x-incident.x,dy=drone.y-incident.y,dist=Math.sqrt(dx*dx+dy*dy);
+  drone.eta=Math.ceil(dist/drone.speed*0.05);
+  incident.droneId=drone.id;incident.eta=drone.eta;incident.status='dispatched';
+
+  // ★ NEW: Log dispatch with incident coordinates
+  const incCoords=xyToCoordStr(incident.x,incident.y);
+  addLog(`DISPATCH: ${drone.id} → INC #${incident.id} @ [${incCoords.short}] ETA ${drone.eta}s`,'dispatch');
+}
+
+function triggerRandomIncident() {
+  const template=INCIDENT_TYPES[Math.floor(Math.random()*INCIDENT_TYPES.length)];
+  const camId=Math.floor(Math.random()*4);const locObj=FEED_LOCATIONS[camId];
+  const jLat=(Math.random()-.5)*.002,jLng=(Math.random()-.5)*.002;
+  const pos=ll2xy(locObj.lat+jLat,locObj.lng+jLng);
+  const incident={id:STATE.incidentIdCounter++,...template,location:locObj.name,x:pos.x,y:pos.y,timestamp:new Date().toLocaleTimeString(),droneId:null,eta:null,status:'unassigned',cam:camId,confidence:.78+Math.random()*.2,age:0,arrivalHandled:false};
+  STATE.incidents.push(incident);
+  if(STATE.feeds[camId]){STATE.feeds[camId].alerting=true;STATE.feeds[camId].detections=[{x:.2+Math.random()*.4,y:.15+Math.random()*.4,w:.15+Math.random()*.2,h:.15+Math.random()*.25,label:template.type,conf:incident.confidence}];setTimeout(()=>{if(STATE.feeds[camId]){STATE.feeds[camId].alerting=false;setTimeout(()=>{if(STATE.feeds[camId])STATE.feeds[camId].detections=[];},8000);}},3000);}
+
+  // ★ NEW: Log with coordinates
+  const coords=xyToCoordStr(pos.x,pos.y);
+  addLog(`YOLO: ${template.type} @ ${locObj.name.toUpperCase()} | ${coords.short} [CONF: ${(incident.confidence*100).toFixed(1)}%]`,'yolo');
+  playAlertSound();
+  const drone=findNearestDrone(incident.x,incident.y);
+  if(drone) dispatchDrone(drone,incident);else{addLog(`WARNING: No drones available — INCIDENT #${incident.id} queued`,'warn');incident.status='pending';}
+  renderIncidents();renderDrones();updateLeafletIncidents();
+}
+
+function clearAllIncidents(){
+  for(const inc of STATE.incidents){const drone=STATE.drones.find(d=>d.assignedIncident===inc.id);if(drone){drone.status='returning';drone.assignedIncident=null;drone.targetX=drone.bx;drone.targetY=drone.by;drone.eta=null;drone.trail=[];buildDronePath(drone);clearAvoidancePath(drone);}}
+  for(const d of STATE.drones){if(d.status==='on-scene'||d.status==='dispatched'||d.status==='avoiding'){d.status='standby';d.assignedIncident=null;d.eta=null;d.trail=[];d.x=d.bx;d.y=d.by;d.targetX=d.bx;d.targetY=d.by;d.bezierPath=null;d.waypointQueue=[];clearAvoidancePath(d);}}
+  STATE.incidents=[];for(const feed of STATE.feeds){feed.alerting=false;feed.detections=[];}
+  for(const id of Object.keys(incidentMarkers)){if(leafletMap)leafletMap.removeLayer(incidentMarkers[id]);}
+  incidentMarkers={};addLog('OPS: All incidents cleared by operator','ok');renderIncidents();renderDrones();
+}
+
+function returnDrone(drone){drone.status='returning';drone.assignedIncident=null;drone.targetX=drone.bx;drone.targetY=drone.by;drone.eta=null;drone.waypointQueue=[];buildDronePath(drone);checkAndRerouteAroundObstacles(drone);clearAvoidancePath(drone);addLog(`RETURN: ${drone.id} → BASE`,'ok');setTimeout(()=>dispatchPending(),600);}
+
+function dispatchPending(){const sevOrder={critical:0,high:1,medium:2};const pending=STATE.incidents.filter(i=>i.status==='pending'||i.status==='unassigned').sort((a,b)=>(sevOrder[a.severity]??2)-(sevOrder[b.severity]??2));for(const inc of pending){const drone=findNearestDrone(inc.x,inc.y);if(!drone)break;dispatchDrone(drone,inc);}}
+
+let autoInterval=null;
+function toggleAuto(){STATE.autoMode=!STATE.autoMode;document.getElementById('autoBtn').textContent=`AUTO: ${STATE.autoMode?'ON':'OFF'}`;document.getElementById('autoBtn').classList.toggle('active',STATE.autoMode);if(STATE.autoMode){autoInterval=setInterval(()=>{if(Math.random()<.35)triggerRandomIncident();},4000);addLog('OPS: Auto-simulation ENABLED','ok');}else{clearInterval(autoInterval);addLog('OPS: Auto-simulation DISABLED','warn');}}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RENDER: DRONE LIST
+// ═══════════════════════════════════════════════════════════════════════════
+function renderDrones(){
+  const list=document.getElementById('droneList');
+  list.innerHTML=STATE.drones.map(d=>{
+    const batClass=d.battery>60?'bat-high':d.battery>30?'bat-mid':'bat-low';
+    const statusClass=d.status==='standby'?'status-standby':d.status==='dispatched'?'status-dispatched':d.status==='returning'?'status-returning':d.status==='avoiding'?'status-avoiding':'status-charging';
+    const cardClass=`${d.status==='dispatched'?'dispatched':''} ${d.battery<25?'low-battery':''} ${d.boundaryBreach?'boundary-breach':''}`.trim();
+    const col=getDroneColor(d.status);const spinning=d.status==='dispatched'||d.status==='returning'||d.status==='avoiding';
+    const statusLabel=d.status==='avoiding'?`AVOID: ${(d.avoidingObstacle||'OBSTACLE').substring(0,10)}`:d.status.toUpperCase();
+    // ★ NEW: Include current lat/lng in drone card
+    const coords=xyToCoordStr(d.x,d.y);
+    return`<div class="drone-card ${cardClass}">
+      <div class="drone-top"><div class="drone-left"><div class="drone-icon-card">${droneSVG(col,spinning)}</div><span class="drone-id">${d.id}</span></div><span class="drone-status-tag ${statusClass}">${statusLabel}</span></div>
+      <div class="drone-metrics">
+        <div class="metric">BAT <span class="metric-val">${d.battery.toFixed(0)}%</span></div>
+        <div class="metric">ALT <span class="metric-val">${d.altitude.toFixed(0)}m</span></div>
+        <div class="metric">HDG <span class="metric-val">${((d.heading||0)*180/Math.PI).toFixed(0)}°</span></div>
+        <div class="metric">ETA <span class="metric-val">${d.eta?d.eta+'s':'--'}</span></div>
+      </div>
+      <div style="font-family:'Space Mono',monospace;font-size:7px;color:rgba(56,189,248,.6);margin-top:4px;letter-spacing:.3px;">${coords.lat}°N, ${coords.lng}°E</div>
+      <div class="battery-bar"><div class="battery-fill ${batClass}" style="width:${d.battery}%"></div></div>
+    </div>`;
+  }).join('');
+  document.getElementById('activeCount').textContent=STATE.drones.filter(d=>d.status==='standby').length;
+  document.getElementById('dispatchCount').textContent=STATE.drones.filter(d=>d.status==='dispatched').length;
+  document.getElementById('avoidingCount').textContent=STATE.drones.filter(d=>d.status==='avoiding').length;
+  updateLeafletDrones();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RENDER: INCIDENTS
+//  ★ MODIFIED: Now includes incident coordinates in the card display
+// ═══════════════════════════════════════════════════════════════════════════
+function renderIncidents(){
+  const list=document.getElementById('incidentList');
+  const active=STATE.incidents.filter(i=>i.status!=='resolved');
+  document.getElementById('incidentBadge').textContent=`${active.length} ALERTS`;
+  document.getElementById('headerAlert').textContent=`${active.length} ACTIVE INCIDENTS`;
+  const dot=document.getElementById('incidentDot');
+  dot.style.background=active.length>0?'var(--accent-danger)':'var(--text-dim)';
+  dot.style.boxShadow=active.length>0?'0 0 6px var(--accent-danger)':'none';
+
+  if(active.length===0){list.innerHTML=`<div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);text-align:center;padding:20px;">MONITORING — NO INCIDENTS<br><br><span style="font-size:8px">Scanning all feeds</span></div>`;updateLeafletIncidents();return;}
+  if(list.children.length>0&&!list.children[0].classList.contains('incident-card')) list.innerHTML='';
+  const activeIds=new Set(active.map(i=>`inc-${i.id}`));
+  Array.from(list.children).forEach(child=>{if(!activeIds.has(child.id))child.remove();});
+  active.slice().reverse().forEach((inc,index)=>{
+    const sevClass=inc.severity==='critical'?'sev-critical':inc.severity==='high'?'sev-high':'sev-medium';
+    const cardId=`inc-${inc.id}`;
+    let card=document.getElementById(cardId);
+
+    // ★ NEW: Compute and display incident coordinates
+    const incCoords=xyToCoordStr(inc.x,inc.y);
+
+    const content=`
+      <div class="inc-top"><span class="inc-type">${inc.icon} ${inc.type}</span><span class="severity-tag ${sevClass}">${inc.severity.toUpperCase()}</span></div>
+      <div class="inc-location">📍 ${inc.location} | CAM-${inc.cam+1}</div>
+      <div class="inc-location">${inc.desc} | CONF: ${(inc.confidence*100).toFixed(1)}%</div>
+      <div class="inc-coords">${incCoords.lat}°N, ${incCoords.lng}°E</div>
+      <div class="inc-dispatch"><span class="inc-drone-assigned">${inc.droneId?'▶ '+inc.droneId:'⏳ QUEUED'}</span><span class="inc-eta">${inc.eta?'ETA '+inc.eta+'s':'--'}</span></div>`;
+
+    if(!card){card=document.createElement('div');card.id=cardId;card.className=`incident-card ${inc.severity==='critical'?'critical':''}`;card.innerHTML=content;list.appendChild(card);}
+    else{card.className=`incident-card ${inc.severity==='critical'?'critical':''}`;card.innerHTML=content;}
+    if(list.children[index]!==card) list.insertBefore(card,list.children[index]);
+  });
+  updateLeafletIncidents();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  LOG
+// ═══════════════════════════════════════════════════════════════════════════
+function addLog(msg,type=''){
+  const time=new Date().toLocaleTimeString('en-GB',{hour12:false});
+  STATE.logEntries.unshift({time,msg,type});if(STATE.logEntries.length>80)STATE.logEntries.pop();
+  const list=document.getElementById('logList');
+  const entry=document.createElement('div');entry.className='log-entry';
+  entry.innerHTML=`<span class="log-time">${time}</span><span class="log-msg ${type}">${msg}</span>`;
+  list.insertBefore(entry,list.firstChild);if(list.children.length>80)list.removeChild(list.lastChild);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  VIDEO FEEDS
+// ═══════════════════════════════════════════════════════════════════════════
+const FEED_NAMES=['FC ROAD / SECTOR 7A','STATION PLAZA / SECTOR 3B','KOREGAON PARK / SECTOR 4C','VIMAN NAGAR / SECTOR 9D'];
+const FEED_TYPES=['intersection','commercial','park','highway'];
+
+function initFeeds(){
+  STATE.feeds=FEED_NAMES.map((name,i)=>({name,type:FEED_TYPES[i],alerting:false,detections:[],noisePhase:Math.random()*Math.PI*2,people:Array.from({length:3+Math.floor(Math.random()*5)},()=>({x:Math.random(),y:.3+Math.random()*.6,vx:(Math.random()-.5)*.003,vy:(Math.random()-.5)*.001,size:3+Math.random()*3})),vehicles:Array.from({length:Math.floor(Math.random()*3)},()=>({x:Math.random(),y:.2+Math.random()*.7,vx:(Math.random()-.5)*.005,w:10+Math.random()*8,h:5+Math.random()*4}))}));
+  const grid=document.getElementById('feedsGrid');grid.innerHTML='';
+  STATE.feeds.forEach((feed,i)=>{
+    const slot=document.createElement('div');slot.className='feed-slot';slot.id=`feedSlot${i}`;
+    const webcamHtml=i===0?`<video id="webcamVideo" class="webcam-video" autoplay muted playsinline></video>`:'';
+    slot.innerHTML=`${webcamHtml}<canvas class="feed-canvas" id="feedCanvas${i}"></canvas><div class="feed-alert-overlay"></div><div class="feed-label"><span id="feedLabel${i}">CAM-${i+1} | ${feed.name}</span><span id="feedStatus${i}" style="color:var(--accent-ok)">● LIVE</span></div>`;
+    grid.appendChild(slot);
+  });
+}
+
+function renderFeed(i,dt){
+  const canvas=document.getElementById(`feedCanvas${i}`);if(!canvas)return;
+  const slot=document.getElementById(`feedSlot${i}`);const feed=STATE.feeds[i];
+  if(i===0&&STATE.webcamActive){renderWebcamOverlay(canvas,dt);if(feed.alerting)slot.classList.add('alerting');else slot.classList.remove('alerting');return;}
+  const W=slot.clientWidth,H=slot.clientHeight;canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext('2d');const grad=ctx.createLinearGradient(0,0,0,H);grad.addColorStop(0,'#0d0d0d');grad.addColorStop(1,'#050505');ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(255,255,255,.03)';ctx.lineWidth=1;for(let x=0;x<W;x+=30){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}for(let y=0;y<H;y+=30){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  ctx.fillStyle='rgba(30,30,30,.6)';ctx.fillRect(0,H*.45,W,H*.15);ctx.strokeStyle='rgba(255,255,200,.08)';ctx.setLineDash([W*.05,W*.05]);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,H*.525);ctx.lineTo(W,H*.525);ctx.stroke();ctx.setLineDash([]);
+  const bh2=[.5,.35,.45,.3,.4,.55,.35];bh2.forEach((h,bi)=>{const bw=W/bh2.length;ctx.fillStyle=`rgba(15,15,15,${.85+bi*.02})`;ctx.fillRect(bi*bw+1,H*(1-h),bw-2,H*h);for(let wr=0;wr<3;wr++){for(let wc=0;wc<2;wc++){if(Math.random()>.4){ctx.fillStyle='rgba(255,230,100,.2)';ctx.fillRect(bi*bw+4+wc*8,H*(1-h)+6+wr*10,5,4);}}}});
+  for(const p of feed.people){p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>1)p.vx*=-1;if(p.y<.2||p.y>.95)p.vy*=-1;const px=p.x*W,py=p.y*H;ctx.fillStyle='rgba(180,200,220,.6)';ctx.beginPath();ctx.arc(px,py-p.size,p.size*.6,0,Math.PI*2);ctx.fill();ctx.fillRect(px-p.size*.4,py-p.size,p.size*.8,p.size*1.5);}
+  for(const v of feed.vehicles){v.x+=v.vx;if(v.x<-.1)v.x=1.1;if(v.x>1.1)v.x=-.1;ctx.fillStyle='rgba(60,80,100,.5)';ctx.fillRect(v.x*W,v.y*H,v.w,v.h);ctx.fillStyle='rgba(255,210,50,.5)';ctx.fillRect(v.vx>0?(v.x*W+v.w-2):v.x*W,v.y*H,2,v.h);}
+  ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(2,2,122,14);ctx.fillStyle='rgba(255,255,255,.5)';ctx.font='8px JetBrains Mono, monospace';ctx.fillText(new Date().toLocaleTimeString('en-GB',{hour12:false}),4,12);
+  for(const det of feed.detections){const bx=det.x*W,by=det.y*H,bw=det.w*W,bh=det.h*H;ctx.strokeStyle='#a3e635';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,bh);const cs=8;ctx.lineWidth=2.5;ctx.strokeStyle='#a3e635';ctx.beginPath();ctx.moveTo(bx,by+cs);ctx.lineTo(bx,by);ctx.lineTo(bx+cs,by);ctx.moveTo(bx+bw-cs,by);ctx.lineTo(bx+bw,by);ctx.lineTo(bx+bw,by+cs);ctx.moveTo(bx+bw,by+bh-cs);ctx.lineTo(bx+bw,by+bh);ctx.lineTo(bx+bw-cs,by+bh);ctx.moveTo(bx+cs,by+bh);ctx.lineTo(bx,by+bh);ctx.lineTo(bx,by+bh-cs);ctx.stroke();ctx.fillStyle='rgba(0,0,0,.8)';ctx.fillRect(bx,by-14,det.label.length*5.2+18,14);ctx.fillStyle='#a3e635';ctx.font='8px JetBrains Mono, monospace';ctx.fillText(`${det.label} ${(det.conf*100).toFixed(0)}%`,bx+2,by-3);ctx.fillStyle='rgba(163,230,53,.2)';ctx.fillRect(bx,by+bh+1,bw,2);ctx.fillStyle='#a3e635';ctx.fillRect(bx,by+bh+1,bw*det.conf,2);}
+  if(feed.alerting)slot.classList.add('alerting');else slot.classList.remove('alerting');
+  feed.noisePhase+=.05;const scanY2=((Math.sin(feed.noisePhase)*.5+.5)*H)|0;const sg=ctx.createLinearGradient(0,scanY2-3,0,scanY2+3);sg.addColorStop(0,'transparent');sg.addColorStop(.5,'rgba(255,255,255,.025)');sg.addColorStop(1,'transparent');ctx.fillStyle=sg;ctx.fillRect(0,scanY2-3,W,6);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SIMULATION CANVAS (PX4 / Gazebo)
+// ═══════════════════════════════════════════════════════════════════════════
+let simCanvasInited=false;
+const SIM_DRONES_STATE=[{id:'SIM-1',x:.5,y:.5,tx:.5,ty:.5,speed:.003,trail:[],status:'idle',battery:92}];
+const SIM_GEO_BOXES=[{x:.6,y:.1,w:.25,h:.2,col:'#f97316',label:'GF-01 AIRPORT'},{x:.35,y:.42,w:.12,h:.1,col:'#ef4444',label:'GF-02 HOSPITAL'},{x:.2,y:.3,w:.15,h:.12,col:'#f97316',label:'GF-03 GOV'}];
+const SIM_CCTV=[{x:.3,y:.55},{x:.55,y:.45},{x:.65,y:.65},{x:.7,y:.35}];
+let simYoloActive=[],simDroneInc=null;
+
+function initSimCanvas(){if(simCanvasInited)return;simCanvasInited=true;renderROSFeed();simLoop();}
+function simLoop(){drawPX4Canvas();updateSimDrone();updateSimMavlink();requestAnimationFrame(simLoop);}
+
+function drawPX4Canvas(){
+  const canvas=document.getElementById('px4Canvas');if(!canvas)return;
+  const W=canvas.parentElement.clientWidth,H=canvas.parentElement.clientHeight;canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#0a0a0a';ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(255,255,255,.04)';ctx.lineWidth=1;for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}for(let y=0;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  ctx.strokeStyle='rgba(255,255,255,.06)';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(0,H*.5);ctx.lineTo(W,H*.5);ctx.stroke();ctx.beginPath();ctx.moveTo(W*.5,0);ctx.lineTo(W*.5,H);ctx.stroke();ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(W*.2,0);ctx.lineTo(W*.2,H);ctx.stroke();ctx.beginPath();ctx.moveTo(W*.8,0);ctx.lineTo(W*.8,H);ctx.stroke();
+  ctx.strokeStyle='rgba(168,85,247,.5)';ctx.lineWidth=1.5;ctx.setLineDash([8,5]);ctx.beginPath();OPERATIONAL_BOUNDARY_XY.forEach((p,i)=>{i===0?ctx.moveTo(p.x*W,p.y*H):ctx.lineTo(p.x*W,p.y*H);});ctx.closePath();ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='rgba(168,85,247,.04)';ctx.fill();
+  SIM_GEO_BOXES.forEach(z=>{const x=z.x*W,y=z.y*H,w=z.w*W,h=z.h*H;ctx.fillStyle=z.col+'18';ctx.fillRect(x,y,w,h);ctx.strokeStyle=z.col;ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.strokeRect(x,y,w,h);ctx.setLineDash([]);ctx.fillStyle=z.col;ctx.font='bold 8px JetBrains Mono, monospace';ctx.fillText(z.label,x+4,y+12);ctx.fillStyle=z.col+'28';for(let i=0;i<10;i++){ctx.fillRect(x+i*w/10,y,w/20,h);}});
+  SIM_CCTV.forEach((c,i)=>{const cx=c.x*W,cy=c.y*H;ctx.fillStyle='rgba(56,189,248,.12)';ctx.beginPath();ctx.arc(cx,cy,20,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(56,189,248,.4)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(cx,cy,20,0,Math.PI*2);ctx.stroke();ctx.fillStyle='#38bdf8';ctx.font='9px JetBrains Mono';ctx.fillText(`CAM-${i+1}`,cx-14,cy+3);});
+  if(simDroneInc){const ix=simDroneInc.x*W,iy=simDroneInc.y*H,t=Date.now();ctx.strokeStyle=`rgba(255,68,68,${.5+.5*Math.sin(t*.01)})`;ctx.lineWidth=1.5;ctx.setLineDash([]);for(let r=0;r<3;r++){ctx.beginPath();ctx.arc(ix,iy,12+(r*8)+((t*.05)%8),0,Math.PI*2);ctx.globalAlpha=.6-r*.2;ctx.stroke();}ctx.globalAlpha=1;ctx.fillStyle='#ff4444';ctx.font='bold 9px JetBrains Mono';ctx.fillText(`⚡ ${simDroneInc.label}`,ix-25,iy-20);}
+  simYoloActive.forEach(d=>{const bx=d.x*W,by=d.y*H,bw=d.w*W,bh=d.h*H;ctx.strokeStyle='#a3e635';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,bh);ctx.fillStyle='rgba(0,0,0,.8)';ctx.fillRect(bx,by-13,d.label.length*5+12,13);ctx.fillStyle='#a3e635';ctx.font='8px JetBrains Mono';ctx.fillText(`${d.label} ${(d.conf*100).toFixed(0)}%`,bx+2,by-2);});
+  const sd=SIM_DRONES_STATE[0];
+  if(sd.trail.length>1){ctx.beginPath();ctx.moveTo(sd.trail[0].x*W,sd.trail[0].y*H);sd.trail.forEach(p=>ctx.lineTo(p.x*W,p.y*H));ctx.strokeStyle='rgba(129,140,248,.4)';ctx.lineWidth=1.5;ctx.setLineDash([3,4]);ctx.stroke();ctx.setLineDash([]);}
+  const dx2=sd.x*W,dy2=sd.y*H,col='#818cf8';ctx.fillStyle=col+'22';ctx.beginPath();ctx.arc(dx2,dy2,24,0,Math.PI*2);ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=1;ctx.setLineDash([]);ctx.beginPath();ctx.arc(dx2,dy2,24,0,Math.PI*2);ctx.stroke();
+  const ang=STATE.simFrame*.04;const arms=[[-1,-1],[1,-1],[1,1],[-1,1]];
+  arms.forEach(([sx,sy])=>{const ex=dx2+sx*10,ey=dy2+sy*10;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(dx2,dy2);ctx.lineTo(ex,ey);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.arc(ex,ey,3.5,0,Math.PI*2);ctx.fill();ctx.strokeStyle=col+'88';ctx.lineWidth=1;ctx.beginPath();ctx.arc(ex,ey,5,ang+arms.indexOf([sx,sy])*Math.PI*.5,ang+arms.indexOf([sx,sy])*Math.PI*.5+Math.PI*.8);ctx.stroke();});
+  ctx.fillStyle=col;ctx.fillRect(dx2-3,dy2-3,6,6);
+  // ★ MODIFIED: Show live coordinates under SIM drone label
+  const simCoords=xyToCoordStr(sd.x,sd.y);
+  ctx.fillStyle='rgba(0,0,0,.75)';ctx.fillRect(dx2+10,dy2-22,90,22);ctx.fillStyle=col;ctx.font='bold 8px JetBrains Mono';ctx.fillText(`SIM-1 ${sd.battery.toFixed(0)}%`,dx2+13,dy2-10);ctx.fillStyle='rgba(56,189,248,.7)';ctx.font='7px JetBrains Mono';ctx.fillText(simCoords.short,dx2+13,dy2-1);
+  STATE.simFrame++;
+}
+
+function updateSimDrone(){
+  const sd=SIM_DRONES_STATE[0];const dx=sd.tx-sd.x,dy=sd.ty-sd.y,dist=Math.sqrt(dx*dx+dy*dy);
+  if(dist>.006){sd.x+=dx/dist*sd.speed;sd.y+=dy/dist*sd.speed;sd.trail.push({x:sd.x,y:sd.y});if(sd.trail.length>50)sd.trail.shift();let breached=false;SIM_GEO_BOXES.forEach(z=>{if(sd.x>z.x&&sd.x<z.x+z.w&&sd.y>z.y&&sd.y<z.y+z.h){breached=true;sd.tx=sd.x+(sd.x<z.x+z.w/2?-0.1:0.1);sd.ty=sd.y+(sd.y<z.y+z.h/2?-0.1:0.1);}});document.getElementById('mavGeo').textContent=breached?'BREACH':'CLEAR';document.getElementById('mavGeo').style.color=breached?'var(--accent-danger)':'var(--accent-ok)';}
+  else{if(simDroneInc){simDroneInc=null;addLog('SIM: Drone arrived at incident — assessing','yolo');setTimeout(()=>{sd.tx=.5;sd.ty=.5;addLog('SIM: Returning to base','ok');simYoloActive=[];renderYOLOList();},4000);}}
+  if(!simDroneInc&&dist<.01&&Math.random()<.005){sd.tx=.3+Math.random()*.4;sd.ty=.3+Math.random()*.4;}
+  sd.battery=Math.max(10,sd.battery-(dist>.006?.003:.0005));
+  // ★ MODIFIED: Update simLatLng with real coordinates
+  const sc=xyToCoordStr(sd.x,sd.y);
+  document.getElementById('simLatLng').textContent=`${sc.lat}°N, ${sc.lng}°E`;
+}
+
+let mavlinkTick=0;
+function updateSimMavlink(){mavlinkTick++;if(mavlinkTick%20!==0)return;const sd=SIM_DRONES_STATE[0];const dx=sd.tx-sd.x,dy=sd.ty-sd.y,spd=Math.sqrt(dx*dx+dy*dy)>0.006?3.2+Math.random()*.5:0;const hdg=Math.atan2(dx,dy)*180/Math.PI;document.getElementById('mavAlt').textContent=(40+Math.random()*8).toFixed(1)+'m';document.getElementById('mavSpeed').textContent=spd.toFixed(1)+' m/s';document.getElementById('mavHdg').textContent=Math.abs(Math.round(hdg))+'°';document.getElementById('mavBat').textContent=sd.battery.toFixed(0)+'%';}
+
+function renderROSFeed(){
+  const canvas=document.getElementById('rosFeedCanvas');if(!canvas){setTimeout(renderROSFeed,200);return;}
+  const W=canvas.parentElement.clientWidth,H=canvas.parentElement.clientHeight;if(!W||!H){setTimeout(renderROSFeed,200);return;}
+  canvas.width=W;canvas.height=H;const ctx=canvas.getContext('2d');
+  function drawROSFrame(){ctx.fillStyle='#050505';ctx.fillRect(0,0,W,H);const t=Date.now()*.001;ctx.strokeStyle='rgba(255,255,255,.03)';ctx.lineWidth=1;const gridOff=(t*20)%40;for(let x=-40;x<W+40;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x+gridOff,H);ctx.stroke();}for(let y=0;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y+gridOff*.2);ctx.stroke();}ctx.fillStyle='rgba(20,20,20,.8)';ctx.fillRect(W*.1,H*.4,W*.8,H*.25);ctx.strokeStyle='rgba(255,255,200,.06)';ctx.setLineDash([20,20]);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(W*.1,H*.525);ctx.lineTo(W*.9,H*.525);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='rgba(255,255,255,.04)';ctx.fillRect(W*.05,H*.08,W*.18,H*.28);ctx.fillRect(W*.3,H*.1,W*.12,H*.22);ctx.fillRect(W*.65,H*.05,W*.22,H*.3);const vx=(t*.1)%1.3-.15;ctx.fillStyle='rgba(50,80,100,.6)';ctx.fillRect(vx*W,H*.46,20,10);ctx.fillRect(((vx+.3)%1.3-.15)*W,H*.5,18,10);simYoloActive.forEach(d=>{const bx=d.x*W,by=d.y*H,bw=d.w*W,bh=d.h*H;ctx.strokeStyle='#a3e635';ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,bh);const cs=6;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(bx,by+cs);ctx.lineTo(bx,by);ctx.lineTo(bx+cs,by);ctx.moveTo(bx+bw-cs,by);ctx.lineTo(bx+bw,by);ctx.lineTo(bx+bw,by+cs);ctx.moveTo(bx+bw,by+bh-cs);ctx.lineTo(bx+bw,by+bh);ctx.lineTo(bx+bw-cs,by+bh);ctx.moveTo(bx+cs,by+bh);ctx.lineTo(bx,by+bh);ctx.lineTo(bx,by+bh-cs);ctx.stroke();ctx.fillStyle='rgba(0,0,0,.8)';ctx.fillRect(bx,by-13,d.label.length*5.5+12,13);ctx.fillStyle='#a3e635';ctx.font='8px JetBrains Mono';ctx.fillText(`${d.label} ${(d.conf*100).toFixed(0)}%`,bx+2,by-2);});ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(W/2-20,H/2);ctx.lineTo(W/2+20,H/2);ctx.stroke();ctx.beginPath();ctx.moveTo(W/2,H/2-20);ctx.lineTo(W/2,H/2+20);ctx.stroke();ctx.strokeStyle='rgba(255,255,255,.2)';ctx.lineWidth=1;ctx.strokeRect(W/2-40,H/2-25,80,50);ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(2,2,130,14);ctx.fillStyle='rgba(56,189,248,.8)';ctx.font='8px JetBrains Mono';ctx.fillText(new Date().toLocaleTimeString('en-GB',{hour12:false})+'  ALT:'+SIM_DRONES_STATE[0].battery.toFixed(0)+'%',4,12);const sy2=((t*40)%H)|0;ctx.fillStyle='rgba(255,255,255,.015)';ctx.fillRect(0,sy2,W,2);requestAnimationFrame(drawROSFrame);}
+  drawROSFrame();
+}
+
+function renderYOLOList(){
+  const list=document.getElementById('yoloList');if(!list)return;
+  if(simYoloActive.length===0){list.innerHTML=`<div style="text-align:center;padding:20px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);">WAITING FOR DETECTIONS...</div>`;document.getElementById('yoloCount').textContent='0 OBJECTS';return;}
+  document.getElementById('yoloCount').textContent=`${simYoloActive.length} OBJECTS`;
+  list.innerHTML=simYoloActive.map(d=>`<div class="yolo-item"><div class="yolo-class">■ ${d.label}</div><div class="yolo-conf">${(d.conf*100).toFixed(1)}%</div><div class="yolo-action">${d.action}</div></div>`).join('');
+}
+
+function simTakeoff(){addLog('MAVSDK: ARM + TAKEOFF command sent — target alt: 40m','ros');document.getElementById('mavArmed').textContent='YES';document.getElementById('mavMode').textContent='OFFBOARD';}
+function simReturnHome(){SIM_DRONES_STATE[0].tx=.5;SIM_DRONES_STATE[0].ty=.5;simDroneInc=null;simYoloActive=[];renderYOLOList();addLog('MAVSDK: RTL command sent — returning to home','ros');}
+function simTriggerDetection(){
+  const labels=['FIRE','PERSON','VEHICLE','CROWD','WEAPON'];const label=labels[Math.floor(Math.random()*labels.length)];const incX=.2+Math.random()*.6,incY=.2+Math.random()*.6;
+  simYoloActive=[{x:incX-.06,y:incY-.08,w:.15,h:.18,label,conf:.72+Math.random()*.25,action:'→ DISPATCH'}];simDroneInc={x:incX,y:incY,label};SIM_DRONES_STATE[0].tx=incX;SIM_DRONES_STATE[0].ty=incY;renderYOLOList();
+  const c=xyToCoordStr(incX,incY);
+  addLog(`YOLO SIM: ${label} @ [${c.short}] — drone dispatched`,'yolo');
+  document.getElementById('yoloInf').textContent=(14+Math.floor(Math.random()*8))+'ms';
+}
+function simEmergencyStop(){SIM_DRONES_STATE[0].tx=SIM_DRONES_STATE[0].x;SIM_DRONES_STATE[0].ty=SIM_DRONES_STATE[0].y;addLog('MAVSDK: EMERGENCY STOP — drone holding position','alert');document.getElementById('mavMode').textContent='HOLD';document.getElementById('mavSpeed').textContent='0.0 m/s';}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MAIN UPDATE LOOP
+//  ★ MODIFIED: Added renderDroneCoords() and renderMapDronePositions() calls
+// ═══════════════════════════════════════════════════════════════════════════
+function update(dt) {
+  for(const d of STATE.drones){
+    const isMoving=d.status==='dispatched'||d.status==='returning'||d.status==='avoiding';
+    if(isMoving&&d.bezierPath){
+      const arrived=advanceDroneOnPath(d,dt);
+      enforceBoundary(d);
+      if(d.trail.length===0||Math.hypot(d.x-d.trail[d.trail.length-1].x,d.y-d.trail[d.trail.length-1].y)>0.003){d.trail.push({x:d.x,y:d.y});if(d.trail.length>40)d.trail.shift();}
+      if(arrived){
+        if(d.waypointQueue&&d.waypointQueue.length>0){const next=d.waypointQueue.shift();d.targetX=next.x;d.targetY=next.y;buildDronePath(d);checkAndRerouteAroundObstacles(d);if(d.status==='avoiding'){d.status=d.assignedIncident?'dispatched':'returning';d.avoidingObstacle=null;addLog(`AVOIDANCE: ${d.id} obstacle cleared — resuming mission`,'avoidance');}}
+        else{d.bezierPath=null;d.waypointQueue=[];clearAvoidancePath(d);if(d.status==='dispatched'||d.status==='avoiding'){const inc=STATE.incidents.find(i=>i.id===d.assignedIncident);if(inc&&!inc.arrivalHandled){inc.arrivalHandled=true;addLog(`ARRIVED: ${d.id} @ INCIDENT #${inc.id} | ${inc.type}`,'ok');inc.status='on-scene';const delay=4000+Math.random()*4000;setTimeout(()=>{inc.status='resolved';inc.resolvedAt=Date.now();returnDrone(d);renderIncidents();renderDrones();},delay);}d.status='on-scene';d.eta=null;}else if(d.status==='returning'){d.status='standby';d.trail=[];addLog(`STANDBY: ${d.id} returned to base`,'ok');dispatchPending();}}
+      }
+    } else if(isMoving&&!d.bezierPath){buildDronePath(d);}
+    if(d.status==='dispatched'||d.status==='on-scene'||d.status==='avoiding') d.battery=Math.max(10,d.battery-0.02);
+    if(d.eta!==null) d.eta=Math.max(0,d.eta-dt*0.001);
+    d.altitude+=(Math.random()-.5)*.5;d.altitude=Math.max(60,Math.min(150,d.altitude));
+  }
+
+  const now=Date.now();const prevLen=STATE.incidents.length;
+  STATE.incidents=STATE.incidents.filter(i=>i.status!=='resolved'||!i.resolvedAt||(now-i.resolvedAt)<4000);
+  if(STATE.incidents.length!==prevLen) updateLeafletIncidents();
+
+  STATE.frameCount++;
+  if(STATE.frameCount%6===0) updateLeafletDrones();
+  if(STATE.frameCount%30===0) renderDrones();
+
+  // ★ NEW: Update coordinate panels at a moderate rate (every 15 frames ≈ ~4fps)
+  if(STATE.frameCount%15===0){
+    renderDroneCoords();
+    renderMapDronePositions();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLOCK + MAIN LOOP
+// ═══════════════════════════════════════════════════════════════════════════
+function updateClock(){document.getElementById('clockEl').textContent=new Date().toLocaleTimeString('en-GB',{hour12:false});}
+setInterval(updateClock,1000);
+
+let lastTime=0;
+function loop(ts){const dt=ts-lastTime;lastTime=ts;update(dt);for(let i=0;i<4;i++)renderFeed(i,dt);STATE.animFrame=requestAnimationFrame(loop);}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PANEL COLLAPSE
+// ═══════════════════════════════════════════════════════════════════════════
+const _pState={left:false,right:false,bottom:false,log:false};
+function togglePanel(which){
+  if(which==='left'){_pState.left=!_pState.left;document.getElementById('fleetPanel').classList.toggle('collapsed',_pState.left);document.getElementById('collapseLeft').textContent=_pState.left?'▶':'◀';if(leafletMap)setTimeout(()=>leafletMap.invalidateSize(),260);}
+  else if(which==='right'){_pState.right=!_pState.right;document.getElementById('incidentPanel').classList.toggle('collapsed',_pState.right);document.getElementById('collapseRight').textContent=_pState.right?'◀':'▶';if(leafletMap)setTimeout(()=>leafletMap.invalidateSize(),260);}
+  else if(which==='bottom'){_pState.bottom=!_pState.bottom;document.getElementById('bottomRow').classList.toggle('collapsed',_pState.bottom);document.getElementById('videoPanel').classList.toggle('collapsed',_pState.bottom);document.getElementById('collapseBottom').textContent=_pState.bottom?'▲':'▼';if(leafletMap)setTimeout(()=>leafletMap.invalidateSize(),260);}
+  else if(which==='log'){_pState.log=!_pState.log;document.getElementById('logPanel').classList.toggle('collapsed',_pState.log);document.getElementById('collapseLog').textContent=_pState.log?'◀':'▶';}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════════════════
+async function init() {
+  initDrones(); initFeeds();
+  renderDrones(); renderIncidents();
+  initLeafletMap();
+  addLog('SYSTEM: VIMAAN DYNAMIC v2 Command Platform initialized','ok');
+  addLog('SYSTEM: All subsystems nominal','ok');
+  addLog('SYSTEM: Geolocation grid calibrated [PUNE URBAN SECTOR]','ok');
+  addLog('SYSTEM: 6 drones registered to fleet','ok');
+  addLog('SYSTEM: 3 geofence exclusion zones loaded','geo');
+  addLog('SYSTEM: CCTV video feeds connected — 4/4 active','ok');
+  addLog('SYSTEM: Incident heatmap layer initialized','ok');
+  addLog('SYSTEM: Bezier path navigation engine ACTIVE','avoidance');
+  // ★ NEW init logs
+  addLog('SYSTEM: Map view modes loaded — GREY (default) / DARK / SATELLITE / TERRAIN','ok');
+  addLog('COORDS: Live drone position tracking ACTIVE','coords');
+  addLog('COORDS: Incident coordinate tagging ENABLED','coords');
+  addLog('YOLO: Model loading — YOLOv8 (COCO-SSD backend)','yolo');
+  addLog('ROS: Waiting for ROSBridge on ws://localhost:9090','ros');
+  // ★ NEW: Log base station coordinates on startup
+  BASE_POSITIONS.forEach((pos, i) => {
+    const c = xyToCoordStr(pos.x, pos.y);
+    addLog(`BASE-${i+1}: Station fixed at [${c.short}]`, 'coords');
+  });
+  requestAnimationFrame(loop);
+  initWebcam();
+}
+
+init();
