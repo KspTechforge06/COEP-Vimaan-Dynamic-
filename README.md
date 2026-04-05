@@ -27,4 +27,16 @@ python detection/detect.py
 - The model file is not included due to size constraints.
 - Adjust thresholds in code if needed.
 
+## Demo
+
+### Output 1
+![Detection Output](https://github.com/user-attachments/assets/069b173b-f4fa-4eaf-bdd4-2f398ccc8294)
+
+### Output 2
+![Detection Output](https://github.com/user-attachments/assets/28ef04c4-6564-45f5-9e4f-c86cfa5ae511)
+
+
+
+
+
 
