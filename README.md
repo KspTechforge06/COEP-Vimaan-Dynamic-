@@ -1,42 +1,39 @@
-# Fire and Smoke Detection System
+# 🔥 Fire and Smoke Detection System
 
-This project uses YOLOv8 for real-time fire and smoke detection from CCTV/video streams.
+A real-time **Fire & Smoke Detection System** built using **YOLOv8** to monitor CCTV feeds or video streams and automatically detect potential fire hazards.
 
-## Features
-- Real-time detection using YOLOv8
-- Smoke and fire classification
-- Risk level classification (LOW / MEDIUM / HIGH)
-- Alert triggering system
-- Works with video streams (YouTube/OpenCV)
+The system analyzes video frames using deep learning and triggers alerts when **fire or smoke is detected**, helping enable faster emergency response.
 
-## Setup
+---
 
-Install dependencies:
+# 🚀 Features
 
-pip install ultralytics opencv-python yt-dlp
+- 🔍 **Real-time Detection** using YOLOv8
+- 🔥 **Fire Detection**
+- 💨 **Smoke Detection**
+- ⚠️ **Risk Level Classification**
+  - LOW
+  - MEDIUM
+  - HIGH
+- 🚨 **Automatic Alert Triggering**
+- 📹 Works with:
+  - CCTV Cameras
+  - Video files
+  - Live Streams
+  - YouTube streams
+- ⚡ Optimized for **fast inference**
 
-## Usage
+---
 
-Place your trained model file (`best_drone.pt`) in the project directory.
+# 🧠 System Workflow
 
-Run:
+1. CCTV / Video Stream is captured.
+2. Frames are processed using **YOLOv8 model**.
+3. Model detects:
+   - Fire
+   - Smoke
+4. Detection confidence is analyzed.
+5. Risk level is classified.
+6. Alert is triggered and displayed on the dashboard.
 
-python detection/detect.py
-
-## Notes
-- The model file is not included due to size constraints.
-- Adjust thresholds in code if needed.
-
-## Demo
-
-### Output 1
-![Detection Output](https://github.com/user-attachments/assets/069b173b-f4fa-4eaf-bdd4-2f398ccc8294)
-
-### Output 2
-![Detection Output](https://github.com/user-attachments/assets/28ef04c4-6564-45f5-9e4f-c86cfa5ae511)
-
-
-
-
-
-
+---
